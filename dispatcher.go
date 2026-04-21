@@ -30,8 +30,46 @@ func (d *dispatcher) Reply(ctx context.Context, parent Envelope, payload json.Ra
 	return d.Send(ctx, resp)
 }
 
-// Request is implemented in Task 12.
+// Request sends an envelope as Kind=request and blocks until a matching
+// response (InReplyTo=<request id>) arrives or ctx expires.
 func (d *dispatcher) Request(ctx context.Context, env Envelope) (Envelope, error) {
-	// Stub — filled in Task 12.
-	panic("messaging: Dispatcher.Request not yet implemented (Task 12)")
+	env.Kind = MsgKindRequest
+	env.ID = "" // force Store to assign fresh ID
+
+	// Subscribe BEFORE Send so we don't miss a fast response.
+	// Filter on Kind=response; we'll match InReplyTo after.
+	subCtx, subCancel := context.WithCancel(ctx)
+	defer subCancel()
+
+	sub, err := d.Store.Subscribe(subCtx, Filter{Kind: []Kind{MsgKindResponse}})
+	if err != nil {
+		return Envelope{}, err
+	}
+
+	sent, err := d.Store.Send(ctx, env)
+	if err != nil {
+		return Envelope{}, err
+	}
+
+	for {
+		select {
+		case resp, ok := <-sub:
+			if !ok {
+				// Channel closed; ctx done.
+				if ctx.Err() == context.DeadlineExceeded {
+					return Envelope{}, ErrRequestTimeout
+				}
+				return Envelope{}, ctx.Err()
+			}
+			if resp.InReplyTo == sent.ID {
+				return resp, nil
+			}
+			// Different response; ignore and keep waiting.
+		case <-ctx.Done():
+			if ctx.Err() == context.DeadlineExceeded {
+				return Envelope{}, ErrRequestTimeout
+			}
+			return Envelope{}, ctx.Err()
+		}
+	}
 }
