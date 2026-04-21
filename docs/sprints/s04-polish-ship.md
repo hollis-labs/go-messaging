@@ -13,10 +13,10 @@ green locally, tag `v0.1.0`, and smoke-test external consumption via
 
 ## Exit criteria
 
-- [ ] `README.md` rewritten: install / quick start / address model / message Kinds / delivery semantics / how-to-write-a-Store-impl / scope / design-spec link / license.
-- [ ] `.github/workflows/check.yml` created; workflow name `check`, triggers on `push main` + `pull_request`, job runs fmt-verify + vet + golangci-lint + test-race + govulncheck.
-- [ ] `.golangci.yml` baseline added (errcheck, govet, ineffassign, staticcheck, unused, gofmt, goimports, misspell, unconvert).
-- [ ] `make check` green locally.
+- [x] `README.md` rewritten: install / quick start / address model / message Kinds / delivery semantics / how-to-write-a-Store-impl / scope / design-spec link / license.
+- [x] `.github/workflows/check.yml` created; workflow name `check`, triggers on `push main` + `pull_request`, job runs fmt-verify + vet + golangci-lint + test-race + govulncheck.
+- [x] `.golangci.yml` baseline added (errcheck, govet, ineffassign, staticcheck, unused, gofmt, goimports, misspell, unconvert).
+- [x] `make check` green locally.
 - [ ] `v0.1.0` tag created and pushed.
 - [ ] GitHub Actions run for the tag push is green.
 - [ ] External-module smoke (Task 17.6): clean `/tmp/msg-smoke/` module `go get`'s `@v0.1.0` and runs a Dispatcher Request/Reply; prints `response: {"pong":true}`.
@@ -28,7 +28,7 @@ green locally, tag `v0.1.0`, and smoke-test external consumption via
 
 **Priority:** 1. **Tags:** docs. **Plan Task:** 15 (steps 15.1–15.2).
 
-- [ ] Overwrite `README.md` with the full body from plan Task 15.1:
+- [x] Overwrite `README.md` with the full body from plan Task 15.1:
   - Title + one-paragraph summary.
   - Status line.
   - `## Install` with `go get` command (use `@v0.1.0` even though tag lands in T-s04-03; keeps docs consistent with the shipped tag).
@@ -40,8 +40,8 @@ green locally, tag `v0.1.0`, and smoke-test external consumption via
   - `## Scope` — in-scope / out-of-scope bullets (mirrors epic exit criteria).
   - `## Design reference` — absolute path to spec.
   - `## License` — MIT.
-- [ ] `doc.go` from S01 T-01 is already sufficient; confirm (no change needed).
-- [ ] Commit: `docs: flesh out README with install, quick start, address model, semantics`
+- [x] `doc.go` from S01 T-01 is already sufficient; confirm (no change needed).
+- [x] Commit: `docs: flesh out README with install, quick start, address model, semantics`
 
 **Files:**
 - Modify: `README.md`
@@ -50,17 +50,17 @@ green locally, tag `v0.1.0`, and smoke-test external consumption via
 
 **Priority:** 1. **Tags:** ci, quality-gate. **Plan Task:** 16 (steps 16.1–16.4).
 
-- [ ] Create `.github/workflows/check.yml`:
+- [x] Create `.github/workflows/check.yml`:
   - `on: push: branches:[main]` + `pull_request:`
-  - Steps: `actions/checkout@v4`, `actions/setup-go@v5` (Go 1.22), gofmt verify, `go vet`, `golangci/golangci-lint-action@v6` (version v1.60), `go test -race -count=1 ./...`, `go install golang.org/x/vuln/cmd/govulncheck@latest` + `govulncheck ./...`.
-- [ ] Create `.golangci.yml`:
+  - Steps: `actions/checkout@v4`, `actions/setup-go@v5` (Go 1.22), gofmt verify, `go vet`, `golangci/golangci-lint-action@v6` (version v2.1.6), `go test -race -count=1 ./...`, `go install golang.org/x/vuln/cmd/govulncheck@latest` + `govulncheck ./...`.
+- [x] Create `.golangci.yml`:
   - `version: "2"`, `run.timeout: 5m`
   - `linters.enable`: errcheck, govet, ineffassign, staticcheck, unused, gofmt, goimports, misspell, unconvert
   - `linters.disable`: typecheck (go vet covers it; double-firing)
   - `issues.max-issues-per-linter: 0`, `max-same-issues: 0`
-- [ ] Run `make check` locally. Expected output includes `✓ go vet: ok`, golangci `0 issues`, tests pass under `-race`, `No vulnerabilities found`.
+- [x] Run `make check` locally. Expected output includes `✓ go vet: ok`, golangci `0 issues`, tests pass under `-race`, `No vulnerabilities found`.
   - If `golangci-lint` is not installed locally, run the fallback sequence: `go fmt ./... && go vet ./... && go test -race -count=1 ./... && govulncheck ./...`. CI will still enforce lint.
-- [ ] Commit: `ci: GitHub Actions check workflow + golangci baseline`
+- [x] Commit: `ci: GitHub Actions check workflow + golangci baseline`
 
 **Files:**
 - Create: `.github/workflows/check.yml`, `.golangci.yml`

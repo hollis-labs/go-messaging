@@ -178,6 +178,7 @@ func sortByCreatedAtAndID(xs []*memEnvelope) {
 		return xs[i].env.CreatedAt.Before(xs[j].env.CreatedAt)
 	})
 }
+
 // Thread returns envelopes sharing a ThreadID, chronological order. Read-only.
 func (s *Store) Thread(_ context.Context, threadID string, f messaging.Filter) ([]messaging.Envelope, error) {
 	s.mu.Lock()
@@ -203,6 +204,7 @@ func (s *Store) Thread(_ context.Context, threadID string, f messaging.Filter) (
 	}
 	return out, nil
 }
+
 // Consume advances ConsumedAt for (envelope, recipient). Idempotent.
 func (s *Store) Consume(_ context.Context, id string, recipient messaging.Address) error {
 	s.mu.Lock()
@@ -237,6 +239,7 @@ func (s *Store) Cancel(_ context.Context, id string) error {
 	s.canceled[id] = true
 	return nil
 }
+
 // Subscribe returns a channel that receives newly-created envelopes
 // matching the filter. Closes when ctx is canceled.
 func (s *Store) Subscribe(ctx context.Context, f messaging.Filter) (<-chan messaging.Envelope, error) {
