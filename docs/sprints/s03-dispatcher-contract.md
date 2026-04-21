@@ -13,12 +13,12 @@ Nanite impl) will run against, and ship a runnable `example_test.go` demo.
 
 ## Exit criteria
 
-- [ ] `dispatcher.go`: `NewDispatcher(Store) Dispatcher` + `Reply` + `Request` (no panics, no stubs).
-- [ ] `dispatcher_test.go`: `Reply` field wiring + `Request` happy path + `Request` timeout + `Request` overwrites caller-set ID/Kind.
-- [ ] `messagingtest/contract.go`: `RunContract(t *testing.T, factory Factory)` — ~13 sub-tests covering every `Store` guarantee + 2 `Dispatcher` sub-tests.
-- [ ] `memstore/contract_test.go`: `TestMemstore_Contract` calls `messagingtest.RunContract` with a `memstore.New` factory; passes all sub-tests.
-- [ ] `example_test.go`: package-level `Example()` demonstrating Dispatcher Request/Reply round-trip with `// Output:` assertion.
-- [ ] `go test -race -count=1 ./...` green across the whole module.
+- [x] `dispatcher.go`: `NewDispatcher(Store) Dispatcher` + `Reply` + `Request` (no panics, no stubs).
+- [x] `dispatcher_test.go`: `Reply` field wiring + `Request` happy path + `Request` timeout + `Request` overwrites caller-set ID/Kind.
+- [x] `messagingtest/contract.go`: `RunContract(t *testing.T, factory Factory)` — ~13 sub-tests covering every `Store` guarantee + 2 `Dispatcher` sub-tests.
+- [x] `memstore/contract_test.go`: `TestMemstore_Contract` calls `messagingtest.RunContract` with a `memstore.New` factory; passes all sub-tests.
+- [x] `example_test.go`: package-level `Example()` demonstrating Dispatcher Request/Reply round-trip with `// Output:` assertion.
+- [x] `go test -race -count=1 ./...` green across the whole module.
 
 ## Tasks
 
@@ -27,15 +27,15 @@ Nanite impl) will run against, and ship a runnable `example_test.go` demo.
 **Priority:** 1. **Tags:** dispatcher, reply. **Plan Task:** 11 (steps 11.1–11.5).
 
 TDD:
-- [ ] Create `dispatcher_test.go` with package `messaging_test` (external test package to catch unexported-API drift). Import `memstore` for a concrete Store. Write `TestDispatcher_Reply_WiresFields`: send a parent request, call `Reply`, assert `Kind=response`, `InReplyTo=parent.ID`, `ThreadID` propagated, `From`/`To` swapped, payload preserved.
-- [ ] Run → compile error (`NewDispatcher` undefined)
-- [ ] Create `dispatcher.go`:
+- [x] Create `dispatcher_test.go` with package `messaging_test` (external test package to catch unexported-API drift). Import `memstore` for a concrete Store. Write `TestDispatcher_Reply_WiresFields`: send a parent request, call `Reply`, assert `Kind=response`, `InReplyTo=parent.ID`, `ThreadID` propagated, `From`/`To` swapped, payload preserved.
+- [x] Run → compile error (`NewDispatcher` undefined)
+- [x] Create `dispatcher.go`:
   - Unexported `dispatcher` struct embedding `Store`.
   - `NewDispatcher(s Store) Dispatcher` returns `&dispatcher{Store: s}`.
   - `Reply(ctx, parent, payload)` constructs response: `Kind=MsgKindResponse`, `From=parent.To`, `To=parent.From`, `ThreadID=parent.ThreadID`, `InReplyTo=parent.ID`, `ContentType="application/json"`, then `d.Send(ctx, resp)`.
   - `Request` method: panic stub — implemented in T-s03-02.
-- [ ] Test green
-- [ ] Commit: `feat(messaging): NewDispatcher + Reply helper (Request stubbed)`
+- [x] Test green
+- [x] Commit: `feat(messaging): NewDispatcher + Reply helper (Request stubbed)`
 
 **Files:**
 - Create: `dispatcher.go`, `dispatcher_test.go`
@@ -49,19 +49,19 @@ not yet implemented (Task 12)" so any accidental call surfaces loudly.
 **Priority:** 1. **Tags:** dispatcher, request, timeout. **Plan Task:** 12 (steps 12.1–12.5).
 
 TDD:
-- [ ] Extend `dispatcher_test.go` imports to include `errors` and `time` (merge into existing import block — do NOT add a second).
-- [ ] Append tests:
+- [x] Extend `dispatcher_test.go` imports to include `errors` and `time` (merge into existing import block — do NOT add a second).
+- [x] Append tests:
   - `TestDispatcher_Request_ReceivesResponse`: spawn a goroutine that `Subscribe`'s for `MsgKindRequest`, when one arrives auto-`Reply`. Main goroutine calls `Request`, asserts `Kind=response` and payload.
   - `TestDispatcher_Request_TimesOut`: ctx with 200ms deadline, no responder; expect `messaging.ErrRequestTimeout`.
   - `TestDispatcher_Request_OverwritesKindAndID`: call with caller-set `ID=`"caller-set" and `Kind=MsgKindNotice`; fetch via `Inbox(B)` afterward; assert `Kind=request` and `ID != "caller-set"`.
-- [ ] Replace `Request` panic stub with real impl:
+- [x] Replace `Request` panic stub with real impl:
   - Overwrite `env.Kind = MsgKindRequest`; clear `env.ID = ""` (force Store-assigned UUIDv7).
   - Subscribe BEFORE Send (otherwise fast responses race). Derive `subCtx, subCancel := context.WithCancel(ctx)`; defer `subCancel()`.
   - `sub, err := d.Store.Subscribe(subCtx, Filter{Kind: []Kind{MsgKindResponse}})` — filter on response only; match correlation after.
   - `sent, err := d.Store.Send(ctx, env)` — captures Store-assigned ID.
   - Loop: `select { case resp, ok := <-sub: if !ok { ctx deadline → ErrRequestTimeout else ctx.Err() } if resp.InReplyTo == sent.ID return resp, nil ; case <-ctx.Done(): deadline → ErrRequestTimeout else ctx.Err() }`.
-- [ ] Tests green
-- [ ] Commit: `feat(messaging): Dispatcher.Request with ctx timeout + response correlation`
+- [x] Tests green
+- [x] Commit: `feat(messaging): Dispatcher.Request with ctx timeout + response correlation`
 
 **Files:**
 - Modify: `dispatcher.go`, `dispatcher_test.go`
@@ -80,8 +80,8 @@ table is the reference.
 
 **Priority:** 1. **Tags:** contract, testing, cross-impl. **Plan Task:** 13 (steps 13.1–13.4).
 
-- [ ] Create `messagingtest/contract.go` with package `messagingtest` (NOT `testing` — avoid stdlib collision). Define `Factory func(t *testing.T) messaging.Store` and `RunContract(t, factory)`.
-- [ ] Copy all sub-tests from plan Task 13.1 verbatim:
+- [x] Create `messagingtest/contract.go` with package `messagingtest` (NOT `testing` — avoid stdlib collision). Define `Factory func(t *testing.T) messaging.Store` and `RunContract(t, factory)`.
+- [x] Copy all sub-tests from plan Task 13.1 verbatim:
   - `Send assigns ID + CreatedAt`
   - `Send rejects preset lifecycle`
   - `Get returns ErrNotFound for missing`
@@ -95,10 +95,10 @@ table is the reference.
   - `Subscribe ctx cancel closes channel`
   - `Dispatcher.Request round-trip`
   - `Dispatcher.Request times out`
-- [ ] Copy helpers (`basicEnv`, `withTo`, `recipient`, `must`) into the same file. Keeping them together so impl repos don't need to duplicate them.
-- [ ] Create `memstore/contract_test.go` with package `memstore_test`: `TestMemstore_Contract(t)` calls `messagingtest.RunContract(t, func(t *testing.T) messaging.Store { return memstore.New() })`.
-- [ ] `go test -race -count=1 ./...` all green — every memstore behavior verified twice (once via its own unit tests, once via the contract suite). This is intentional; the contract suite is the canonical guarantee.
-- [ ] Commit: `feat(messagingtest): shared Store contract suite + memstore conformance`
+- [x] Copy helpers (`basicEnv`, `withTo`, `recipient`, `must`) into the same file. Keeping them together so impl repos don't need to duplicate them.
+- [x] Create `memstore/contract_test.go` with package `memstore_test`: `TestMemstore_Contract(t)` calls `messagingtest.RunContract(t, func(t *testing.T) messaging.Store { return memstore.New() })`.
+- [x] `go test -race -count=1 ./...` all green — every memstore behavior verified twice (once via its own unit tests, once via the contract suite). This is intentional; the contract suite is the canonical guarantee.
+- [x] Commit: `feat(messagingtest): shared Store contract suite + memstore conformance`
 
 **Files:**
 - Create: `messagingtest/contract.go`, `memstore/contract_test.go`
@@ -113,15 +113,15 @@ contract conformance across impls. Drift surfaces as sub-test failure in
 
 **Priority:** 2. **Tags:** docs, example. **Plan Task:** 14 (steps 14.1–14.3).
 
-- [ ] Create `example_test.go` with package `messaging_test`. Implement `func Example()` per plan Task 14.1 verbatim:
+- [x] Create `example_test.go` with package `messaging_test`. Implement `func Example()` per plan Task 14.1 verbatim:
   - Construct `memstore.New()` + `messaging.NewDispatcher(store)`.
   - `ctx` with 2s timeout.
   - Two addresses `A` and `B`.
   - Goroutine: `Subscribe` for requests → `Reply({"status":"ok"})` to first matching.
   - Main: `Request` from A → B; print `string(resp.Payload)`.
   - `// Output: got response: {"status":"ok"}` assertion line.
-- [ ] `go test -race -run Example ./...` green (godoc example runner asserts Output match).
-- [ ] Commit: `docs(example): end-to-end Request/Reply demo`
+- [x] `go test -race -run Example ./...` green (godoc example runner asserts Output match).
+- [x] Commit: `docs(example): end-to-end Request/Reply demo`
 
 **Files:**
 - Create: `example_test.go`
@@ -142,10 +142,10 @@ print; ordering is deterministic.
 
 ## Readiness checklist before S04 opens
 
-- [ ] All four tasks ticked and committed on `feat/s03-dispatcher-contract`.
-- [ ] `go test -race -count=1 ./...` green across the whole module (package `messaging` + `memstore` + `messagingtest`).
-- [ ] `go test -race -run Example ./...` green (Output assertion holds).
-- [ ] `go vet ./...` clean.
+- [x] All four tasks ticked and committed on `feat/s03-dispatcher-contract`.
+- [x] `go test -race -count=1 ./...` green across the whole module (package `messaging` + `memstore` + `messagingtest`).
+- [x] `go test -race -run Example ./...` green (Output assertion holds).
+- [x] `go vet ./...` clean.
 - [ ] Branch FF-merged into `main`, feature branch deleted.
 
 ## Review / gotchas
