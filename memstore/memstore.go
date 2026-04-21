@@ -103,8 +103,29 @@ func copyEnvelope(e messaging.Envelope) messaging.Envelope {
 	return out
 }
 
-// Placeholder — fully implemented in Task 10.
-func (s *Store) fanOut(_ messaging.Envelope) {}
+// fanOut broadcasts a newly-created envelope to matching live subscribers.
+// Non-blocking: if a subscriber's buffer is full, the envelope is dropped
+// for that subscriber (memstore's delivery guarantee is Inbox, not Subscribe).
+func (s *Store) fanOut(env messaging.Envelope) {
+	s.mu.Lock()
+	subs := make([]*subscription, len(s.subscribers))
+	copy(subs, s.subscribers)
+	s.mu.Unlock()
+
+	for _, sub := range subs {
+		if !sub.filter.Matches(env) {
+			continue
+		}
+		select {
+		case sub.ch <- copyEnvelope(env):
+		case <-sub.ctx.Done():
+			// subscriber going away; skip.
+		default:
+			// buffer full; drop for this subscriber. Inbox is the
+			// durable path — Subscribe is best-effort live hint.
+		}
+	}
+}
 
 // Inbox returns undelivered envelopes for `to`, chronologically by CreatedAt.
 // Side effect: atomically marks returned envelopes DeliveredAt=now for `to`.
@@ -216,10 +237,40 @@ func (s *Store) Cancel(_ context.Context, id string) error {
 	s.canceled[id] = true
 	return nil
 }
-func (s *Store) Subscribe(context.Context, messaging.Filter) (<-chan messaging.Envelope, error) {
-	return nil, fmt.Errorf("memstore: Subscribe not yet implemented")
+// Subscribe returns a channel that receives newly-created envelopes
+// matching the filter. Closes when ctx is canceled.
+func (s *Store) Subscribe(ctx context.Context, f messaging.Filter) (<-chan messaging.Envelope, error) {
+	// Buffered modestly so slow consumers don't block the producer for a tick.
+	// If a subscriber is too slow, fanOut drops (see comment there).
+	sub := &subscription{
+		ch:     make(chan messaging.Envelope, 16),
+		filter: f,
+		ctx:    ctx,
+	}
+
+	s.mu.Lock()
+	s.subscribers = append(s.subscribers, sub)
+	s.mu.Unlock()
+
+	// Janitor: when ctx is done, remove the sub and close the channel.
+	go func() {
+		<-ctx.Done()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for i, sv := range s.subscribers {
+			if sv == sub {
+				s.subscribers = append(s.subscribers[:i], s.subscribers[i+1:]...)
+				break
+			}
+		}
+		close(sub.ch)
+	}()
+
+	return sub.ch, nil
 }
 
 type subscription struct {
-	// filled in Task 10
+	ch     chan messaging.Envelope
+	filter messaging.Filter
+	ctx    context.Context
 }
