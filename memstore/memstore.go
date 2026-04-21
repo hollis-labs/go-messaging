@@ -157,8 +157,30 @@ func sortByCreatedAtAndID(xs []*memEnvelope) {
 		return xs[i].env.CreatedAt.Before(xs[j].env.CreatedAt)
 	})
 }
-func (s *Store) Thread(context.Context, string, messaging.Filter) ([]messaging.Envelope, error) {
-	return nil, fmt.Errorf("memstore: Thread not yet implemented")
+// Thread returns envelopes sharing a ThreadID, chronological order. Read-only.
+func (s *Store) Thread(_ context.Context, threadID string, f messaging.Filter) ([]messaging.Envelope, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var matches []*memEnvelope
+	for _, m := range s.envelopes {
+		if m.env.ThreadID != threadID {
+			continue
+		}
+		if !f.Matches(m.env) {
+			continue
+		}
+		matches = append(matches, m)
+	}
+	sortByCreatedAtAndID(matches)
+	if f.Limit > 0 && len(matches) > f.Limit {
+		matches = matches[:f.Limit]
+	}
+	out := make([]messaging.Envelope, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, copyEnvelope(m.env))
+	}
+	return out, nil
 }
 // Consume advances ConsumedAt for (envelope, recipient). Idempotent.
 func (s *Store) Consume(_ context.Context, id string, recipient messaging.Address) error {
