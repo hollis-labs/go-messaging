@@ -57,16 +57,16 @@ Surface scope discoveries via `superpowers:surface-discovery`. Do not absorb.
 
 ## Exit criteria (epic-level)
 
-- [ ] `github.com/hollis-labs/go-messaging v0.1.0` tagged and pushed
-- [ ] GitHub Actions `check` workflow green on `main`
-- [ ] `make check` green locally (fmt + vet + lint + test-race + vuln)
-- [ ] `messagingtest.RunContract` passes against `memstore` (all ~13 sub-tests)
-- [ ] `example_test.go` runnable demo prints the canonical round-trip output
-- [ ] Smoke: external module can `go get …@v0.1.0`, construct a Dispatcher,
-      complete a Request/Reply in <30 LoC (Task 17.6)
-- [ ] KB delta: `agent-workspaces/knowledge/portfolio/composition-map.md`
-      gains a "Messaging" row; `shared-needs.md` cross-tool messaging line
-      references this phase as the resolution path (Task 17.5)
+- [x] `github.com/hollis-labs/go-messaging v0.1.0` tagged and pushed (+ `v0.1.1` immediately followed with three CI-config fixes; library code identical)
+- [x] GitHub Actions `check` workflow green on `main` (run `24738693281`)
+- [x] `make check` green locally (fmt + vet + lint + test-race + vuln)
+- [x] `messagingtest.RunContract` passes against `memstore` (13 sub-tests)
+- [x] `example_test.go` runnable demo prints the canonical round-trip output
+- [x] Smoke: external module `go get …@v0.1.1`, constructed a Dispatcher,
+      completed Request/Reply in <30 LoC (Task 17.6; both `@v0.1.0` and `@v0.1.1` verified)
+- [x] KB delta: `agent-workspaces/knowledge/portfolio/composition-map.md`
+      gained a go-messaging row; `shared-needs.md` cross-tool messaging line
+      references this phase as the resolution path (commit `d459faf`)
 
 ## Sprint map
 

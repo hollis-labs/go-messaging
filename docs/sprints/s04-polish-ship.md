@@ -17,10 +17,10 @@ green locally, tag `v0.1.0`, and smoke-test external consumption via
 - [x] `.github/workflows/check.yml` created; workflow name `check`, triggers on `push main` + `pull_request`, job runs fmt-verify + vet + golangci-lint + test-race + govulncheck.
 - [x] `.golangci.yml` baseline added (errcheck, govet, ineffassign, staticcheck, unused, gofmt, goimports, misspell, unconvert).
 - [x] `make check` green locally.
-- [ ] `v0.1.0` tag created and pushed.
-- [ ] GitHub Actions run for the tag push is green.
-- [ ] External-module smoke (Task 17.6): clean `/tmp/msg-smoke/` module `go get`'s `@v0.1.0` and runs a Dispatcher Request/Reply; prints `response: {"pong":true}`.
-- [ ] Portfolio KB updated (`agent-workspaces/knowledge/portfolio/composition-map.md` gains Messaging row; `shared-needs.md` cross-tool messaging line references this phase).
+- [x] `v0.1.0` tag created and pushed (annotated, points at `c52ac47`).
+- [x] GitHub Actions `check` workflow green on `main` (run `24738693281` on `7e2f693`; `v0.1.1` cut to bundle three CI fixes — action v6→v7, go.mod 1.26.1→1.22, setup-go→stable). Workflow isn't tag-triggered; green on the commit v0.1.1 points at.
+- [x] External-module smoke (Task 17.6): `/tmp/msg-smoke/` + `/tmp/msg-smoke-v011/` both printed `response: {"pong":true}` against `@v0.1.0` and `@v0.1.1` respectively.
+- [x] Portfolio KB updated (`agent-workspaces/knowledge/portfolio/composition-map.md` gains Messaging row; `shared-needs.md` cross-tool messaging line references this phase). Commit `d459faf` in agent-workspaces.
 
 ## Tasks
 
@@ -79,28 +79,19 @@ green locally, tag `v0.1.0`, and smoke-test external consumption via
 **Gate:** `git status` clean. All prior commits on `main` after FF-merge of
 prior sprints.
 
-- [ ] `git push -u origin main`. If remote doesn't exist, create
-  `hollis-labs/go-messaging` on GitHub first. **This is a user-visible
-  action** — pushing a new public repo — confirm with user before running
-  if this is the first push.
-- [ ] `git tag v0.1.0 && git push origin v0.1.0`
-- [ ] Verify GitHub Actions: visit `https://github.com/hollis-labs/go-messaging/actions`. Check workflow green on the tag push. Re-run if transient.
-- [ ] Smoke test (plan Task 17.6):
-  ```bash
-  cd /tmp && mkdir msg-smoke && cd msg-smoke
-  go mod init smoke
-  go get github.com/hollis-labs/go-messaging@v0.1.0
-  # (cat plan's main.go into ./main.go)
-  go run .
-  ```
-  Expected stdout: `response: {"pong":true}`. If `go get` fails with
-  "no matching versions for query", the tag hasn't propagated — retry
-  after a minute, or verify `git ls-remote --tags origin` shows `v0.1.0`.
-- [ ] Cleanup: `rm -rf /tmp/msg-smoke`.
-- [ ] **KB updates** (plan Task 17.5 — mandatory this time, not "optional"):
-  - `~/Projects-apps/agent-workspaces/knowledge/portfolio/composition-map.md` — add a "Messaging" row noting `go-messaging v0.1.0` as the shared contract, with agent-mux (Phase 2) and Nanite (Phase 4) as planned consumers.
-  - `~/Projects-apps/agent-workspaces/knowledge/shared-needs.md` — update "shared auth / identity story for cross-tool agent messaging" line to reference this spec + phase.
-- [ ] Commit KB updates in the agent-workspaces repo (separate commit in a separate repo from everything else this sprint).
+- [x] `git push -u origin main` — initial commit `a4aa5fb` pushed at session start; subsequent sprints pushed via FF-merge cycle.
+- [x] `git tag v0.1.0 && git push origin v0.1.0` — annotated tag, points at `c52ac47`.
+- [x] Verify GitHub Actions — v0.1.0's tag-push surfaced three CI-config bugs. Fixed in three commits on `main` and bundled as `v0.1.1` (library identical, no API change):
+  - `fd1c96b` ci: bump `golangci-lint-action` v6→v7 (v2 linter requires v7 action).
+  - `13e5da0` chore(go.mod): lower go directive `1.26.1`→`1.22` to match epic floor (unlocks golangci-lint v2.1.6 on module load).
+  - `7e2f693` ci: pin `setup-go` to `stable` to dodge `GO-2025-3750` (unfixed on Go 1.22.12 patch branch).
+  Run `24738693281` green on `7e2f693`.
+- [x] Smoke test — both `/tmp/msg-smoke/` (`@v0.1.0`) and `/tmp/msg-smoke-v011/` (`@v0.1.1`) printed `response: {"pong":true}`.
+- [x] Cleanup: `rm -rf /tmp/msg-smoke` + `/tmp/msg-smoke-v011` done.
+- [x] **KB updates** (plan Task 17.5 — mandatory this time, not "optional"):
+  - `knowledge/portfolio/composition-map.md` — added go-messaging row to shared SDKs with v0.1.0 + v0.1.1 status and consumer-adoption phases.
+  - `knowledge/portfolio/shared-needs.md` — cross-tool messaging open-question now marked partially-resolved (addressing + delivery shipped; auth/ACL still open).
+- [x] Commit `d459faf` in agent-workspaces (only these two KB files staged; pre-existing inbox / settings baseline left alone per `feedback_multi_session_default_is_baseline`).
 
 **Files:**
 - No files in go-messaging repo for the tag itself (tags are refs, not commits).
@@ -119,13 +110,13 @@ prior sprints.
 
 ## Readiness checklist before closing the epic
 
-- [ ] All three tasks ticked and committed on `feat/s04-polish-ship`.
-- [ ] Branch FF-merged into `main`, feature branch deleted.
-- [ ] `git log --oneline` on `main` shows sequential sprint closes S01 → S04.
-- [ ] `v0.1.0` tag visible on GitHub and locally (`git tag | grep v0.1.0`).
-- [ ] External smoke test printed the expected output.
-- [ ] Epic exit criteria section checkboxes all tick.
-- [ ] KB updates committed in `agent-workspaces/`.
+- [x] All three tasks ticked and committed on `feat/s04-polish-ship` (T-01/T-02 on branch; T-03 executes post-merge on main).
+- [x] Branch FF-merged into `main`, feature branch deleted (both local + remote).
+- [x] `git log --oneline` on `main` shows sequential sprint closes S01 → S04 (S04 followed by three CI-hardening commits rolled into v0.1.1).
+- [x] `v0.1.0` + `v0.1.1` tags visible on GitHub and locally (`git tag` lists both).
+- [x] External smoke test printed `response: {"pong":true}`.
+- [x] Epic exit criteria section checkboxes all tick.
+- [x] KB updates committed in `agent-workspaces/` (`d459faf`).
 
 ## Review / gotchas
 
