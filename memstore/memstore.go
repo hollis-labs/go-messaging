@@ -7,6 +7,7 @@ package memstore
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -105,11 +106,56 @@ func copyEnvelope(e messaging.Envelope) messaging.Envelope {
 // Placeholder — fully implemented in Task 10.
 func (s *Store) fanOut(_ messaging.Envelope) {}
 
-// Placeholder stubs — implemented in later tasks, so the Store interface is
-// satisfied from Task 6 onward. Each returns a "not yet implemented" error
-// so accidental early use surfaces fast.
-func (s *Store) Inbox(context.Context, messaging.Address, messaging.Filter) ([]messaging.Envelope, error) {
-	return nil, fmt.Errorf("memstore: Inbox not yet implemented")
+// Inbox returns undelivered envelopes for `to`, chronologically by CreatedAt.
+// Side effect: atomically marks returned envelopes DeliveredAt=now for `to`.
+func (s *Store) Inbox(_ context.Context, to messaging.Address, f messaging.Filter) ([]messaging.Envelope, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	toURN := to.URN()
+	now := time.Now().UTC()
+
+	// Collect candidates.
+	var matches []*memEnvelope
+	for _, m := range s.envelopes {
+		if m.env.To.URN() != toURN {
+			continue
+		}
+		if _, delivered := m.delivered[toURN]; delivered {
+			continue
+		}
+		if !f.Matches(m.env) {
+			continue
+		}
+		matches = append(matches, m)
+	}
+
+	// Sort chronologically by CreatedAt; tie-break on ID (UUIDv7 monotonic).
+	sortByCreatedAtAndID(matches)
+
+	// Apply limit.
+	if f.Limit > 0 && len(matches) > f.Limit {
+		matches = matches[:f.Limit]
+	}
+
+	// Atomically mark delivered + build result.
+	out := make([]messaging.Envelope, 0, len(matches))
+	for _, m := range matches {
+		m.delivered[toURN] = now
+		env := copyEnvelope(m.env)
+		env.DeliveredAt = &now
+		out = append(out, env)
+	}
+	return out, nil
+}
+
+func sortByCreatedAtAndID(xs []*memEnvelope) {
+	sort.Slice(xs, func(i, j int) bool {
+		if xs[i].env.CreatedAt.Equal(xs[j].env.CreatedAt) {
+			return xs[i].env.ID < xs[j].env.ID
+		}
+		return xs[i].env.CreatedAt.Before(xs[j].env.CreatedAt)
+	})
 }
 func (s *Store) Thread(context.Context, string, messaging.Filter) ([]messaging.Envelope, error) {
 	return nil, fmt.Errorf("memstore: Thread not yet implemented")
