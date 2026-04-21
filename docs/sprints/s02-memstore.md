@@ -13,11 +13,11 @@ Primary usage: tests and embedded (process-local) agents.
 
 ## Exit criteria
 
-- [ ] `memstore/memstore.go` implements every `messaging.Store` method (no stubs, no panics).
-- [ ] `memstore/memstore_test.go` covers: Send (ID assignment, caller-ID overwrite, ErrPresetLifecycle rejection), Get (found, NotFound), Inbox (undelivered only, chronological, Kind filter, per-recipient isolation), Consume (sets ConsumedAt, idempotent), Cancel (marks dead, idempotent, NotFound), Thread (chronological, no delivery side-effects), Subscribe (live-only, filters apply, ctx-cancel closes channel, multi-subscriber).
-- [ ] `go test -race -count=1 ./memstore/...` green (no goroutine leaks from `Subscribe`).
-- [ ] `go vet ./...` clean.
-- [ ] `memstore.New()` returns `*memstore.Store`, which satisfies `messaging.Store` as a method-set check (compile-time assertion recommended — add `var _ messaging.Store = (*Store)(nil)` in the package).
+- [x] `memstore/memstore.go` implements every `messaging.Store` method (no stubs, no panics).
+- [x] `memstore/memstore_test.go` covers: Send (ID assignment, caller-ID overwrite, ErrPresetLifecycle rejection), Get (found, NotFound), Inbox (undelivered only, chronological, Kind filter, per-recipient isolation), Consume (sets ConsumedAt, idempotent), Cancel (marks dead, idempotent, NotFound), Thread (chronological, no delivery side-effects), Subscribe (live-only, filters apply, ctx-cancel closes channel, multi-subscriber).
+- [x] `go test -race -count=1 ./memstore/...` green (no goroutine leaks from `Subscribe`).
+- [x] `go vet ./...` clean.
+- [x] `memstore.New()` returns `*memstore.Store`, which satisfies `messaging.Store` as a method-set check (compile-time assertion recommended — add `var _ messaging.Store = (*Store)(nil)` in the package).
 
 ## Tasks
 
@@ -29,9 +29,9 @@ commits. Code is in the plan — **transcribe, don't improvise**.
 **Priority:** 1. **Tags:** memstore, core. **Plan Task:** 6 (steps 6.1–6.5).
 
 TDD:
-- [ ] Write `memstore/memstore_test.go` with `TestMemstore_Send_AssignsID`, `TestMemstore_Send_OverwritesCallerID`, `TestMemstore_Send_RejectsPresetLifecycle`, `TestMemstore_Get`, `TestMemstore_Get_NotFound` + `newAddr` helper
-- [ ] Run → compile error (`memstore.New` undefined)
-- [ ] Write `memstore/memstore.go`:
+- [x] Write `memstore/memstore_test.go` with `TestMemstore_Send_AssignsID`, `TestMemstore_Send_OverwritesCallerID`, `TestMemstore_Send_RejectsPresetLifecycle`, `TestMemstore_Get`, `TestMemstore_Get_NotFound` + `newAddr` helper
+- [x] Run → compile error (`memstore.New` undefined)
+- [x] Write `memstore/memstore.go`:
   - Package comment: in-memory; tests + embedded use; non-durable.
   - `Store` struct: `mu sync.Mutex`, `envelopes map[string]*memEnvelope`, `subscribers []*subscription`, `canceled map[string]bool`
   - `memEnvelope` inner type: `env messaging.Envelope`, `delivered map[string]time.Time` (URN → time), `consumed map[string]time.Time`
@@ -39,8 +39,8 @@ TDD:
   - `Send` assigns `uuid.NewV7().String()` + `time.Now().UTC()`, rejects preset `DeliveredAt`/`ConsumedAt` with `messaging.ErrPresetLifecycle`, calls `fanOut` (stub for now)
   - `Get` returns defensive copy via `copyEnvelope` helper (deep-copies pointer time fields)
   - Stub out `Inbox`, `Thread`, `Consume`, `Cancel`, `Subscribe` returning `"not yet implemented"` errors so the interface is satisfied as of this task
-- [ ] Tests green
-- [ ] Commit: `feat(memstore): Send + Get with ID assignment + lifecycle rejection`
+- [x] Tests green
+- [x] Commit: `feat(memstore): Send + Get with ID assignment + lifecycle rejection`
 
 **Why the stubs:** later tasks replace each stub one-by-one with real impls.
 Keeps `memstore.Store` satisfying `messaging.Store` after every commit — so
@@ -55,17 +55,17 @@ S02 tasks land incrementally.
 **Priority:** 1. **Tags:** memstore, core, delivery-lifecycle. **Plan Task:** 7 (steps 7.1–7.5).
 
 TDD:
-- [ ] Append tests: `TestMemstore_Inbox_ReturnsUndelivered` (second call returns zero), `TestMemstore_Inbox_ChronologicalOrder`, `TestMemstore_Inbox_FilterByKind`, `TestMemstore_Inbox_RespectsRecipient`
-- [ ] Replace `Inbox` stub with real impl:
+- [x] Append tests: `TestMemstore_Inbox_ReturnsUndelivered` (second call returns zero), `TestMemstore_Inbox_ChronologicalOrder`, `TestMemstore_Inbox_FilterByKind`, `TestMemstore_Inbox_RespectsRecipient`
+- [x] Replace `Inbox` stub with real impl:
   - Lock `s.mu` for the whole op (atomic "collect + mark delivered").
   - Filter: `m.env.To.URN() == to.URN()` AND not already in `m.delivered[toURN]` AND `f.Matches(m.env)`.
   - Sort by `CreatedAt` ASC; tie-break on `ID` (UUIDv7 is monotonic so IDs tiebreak correctly).
   - Apply `f.Limit` if > 0.
   - For each result: set `m.delivered[toURN] = now`; return copy with `DeliveredAt = &now`.
   - Add helper `sortByCreatedAtAndID(xs []*memEnvelope)` using `sort.Slice`.
-- [ ] Add `"sort"` to imports.
-- [ ] Tests green
-- [ ] Commit: `feat(memstore): Inbox with atomic per-recipient delivery marking`
+- [x] Add `"sort"` to imports.
+- [x] Tests green
+- [x] Commit: `feat(memstore): Inbox with atomic per-recipient delivery marking`
 
 **Files:**
 - Modify: `memstore/memstore.go`, `memstore/memstore_test.go`
@@ -80,16 +80,16 @@ Address means both get their own tracking slot.
 **Priority:** 1. **Tags:** memstore, core. **Plan Task:** 8 (steps 8.1–8.5).
 
 TDD:
-- [ ] Append tests: `TestMemstore_Consume`, `TestMemstore_Consume_Idempotent`, `TestMemstore_Cancel`, `TestMemstore_Cancel_NotFound`
-- [ ] Replace `Consume` stub:
+- [x] Append tests: `TestMemstore_Consume`, `TestMemstore_Consume_Idempotent`, `TestMemstore_Cancel`, `TestMemstore_Cancel_NotFound`
+- [x] Replace `Consume` stub:
   - Return `messaging.ErrNotFound` if envelope ID unknown.
   - If `recipient.URN()` already in `m.consumed`, return nil (idempotent).
   - Set `m.consumed[rURN] = now`, mirror onto `m.env.ConsumedAt = &now` so `Get` reflects consumption.
-- [ ] Replace `Cancel` stub:
+- [x] Replace `Cancel` stub:
   - Return `messaging.ErrNotFound` if envelope ID unknown.
   - `s.canceled[id] = true` (idempotent — map overwrite is fine).
-- [ ] Tests green
-- [ ] Commit: `feat(memstore): Consume + Cancel with idempotency`
+- [x] Tests green
+- [x] Commit: `feat(memstore): Consume + Cancel with idempotency`
 
 **Files:**
 - Modify: `memstore/memstore.go`, `memstore/memstore_test.go`
@@ -106,15 +106,15 @@ Dispatcher handles correlation).
 **Priority:** 2. **Tags:** memstore, queries. **Plan Task:** 9 (steps 9.1–9.5).
 
 TDD:
-- [ ] Append tests: `TestMemstore_Thread_ReturnsChronological`, `TestMemstore_Thread_NoSideEffects` (Inbox after Thread still returns — proving Thread didn't mutate delivery state)
-- [ ] Replace `Thread` stub:
+- [x] Append tests: `TestMemstore_Thread_ReturnsChronological`, `TestMemstore_Thread_NoSideEffects` (Inbox after Thread still returns — proving Thread didn't mutate delivery state)
+- [x] Replace `Thread` stub:
   - Filter: `m.env.ThreadID == threadID` AND `f.Matches(m.env)`
   - Sort by `CreatedAt` + tie-break on ID (reuse `sortByCreatedAtAndID`)
   - Apply `f.Limit`
   - Return copies via `copyEnvelope`
   - **NO** mutation of `m.delivered` or `m.consumed`.
-- [ ] Tests green
-- [ ] Commit: `feat(memstore): Thread read-only queries`
+- [x] Tests green
+- [x] Commit: `feat(memstore): Thread read-only queries`
 
 **Files:**
 - Modify: `memstore/memstore.go`, `memstore/memstore_test.go`
@@ -124,17 +124,17 @@ TDD:
 **Priority:** 1. **Tags:** memstore, subscribe, goroutines. **Plan Task:** 10 (steps 10.1–10.5).
 
 TDD:
-- [ ] Append tests: `TestMemstore_Subscribe_LiveOnly` (historical envelope must not replay), `TestMemstore_Subscribe_FiltersApply`, `TestMemstore_Subscribe_CtxCancelClosesChannel`, `TestMemstore_Subscribe_MultipleSubscribers`
-- [ ] Replace `subscription` placeholder struct with `{ch chan messaging.Envelope; filter messaging.Filter; ctx context.Context}`
-- [ ] Replace `Subscribe` stub:
+- [x] Append tests: `TestMemstore_Subscribe_LiveOnly` (historical envelope must not replay), `TestMemstore_Subscribe_FiltersApply`, `TestMemstore_Subscribe_CtxCancelClosesChannel`, `TestMemstore_Subscribe_MultipleSubscribers`
+- [x] Replace `subscription` placeholder struct with `{ch chan messaging.Envelope; filter messaging.Filter; ctx context.Context}`
+- [x] Replace `Subscribe` stub:
   - Make buffered channel (`make(chan messaging.Envelope, 16)`).
   - Append subscription to `s.subscribers` under lock.
   - Spawn janitor goroutine: `<-ctx.Done()` → under lock, remove from `s.subscribers` slice, close `sub.ch`.
-- [ ] Replace `fanOut` placeholder with real impl:
+- [x] Replace `fanOut` placeholder with real impl:
   - Snapshot subscribers under lock, release lock before send (don't hold lock across channel ops).
   - For each matching subscriber, non-blocking `select`: send OR `<-sub.ctx.Done()` (skip going-away) OR `default` (drop — `Subscribe` is best-effort; `Inbox` is durable).
-- [ ] Tests green under `-race -count=1` (confirms no goroutine leak).
-- [ ] Commit: `feat(memstore): Subscribe with live-only fan-out and ctx-driven cleanup`
+- [x] Tests green under `-race -count=1` (confirms no goroutine leak).
+- [x] Commit: `feat(memstore): Subscribe with live-only fan-out and ctx-driven cleanup`
 
 **Files:**
 - Modify: `memstore/memstore.go`, `memstore/memstore_test.go`
@@ -159,10 +159,10 @@ TDD:
 
 ## Readiness checklist before S03 opens
 
-- [ ] All five tasks ticked and committed on `feat/s02-memstore`.
-- [ ] `go test -race -count=1 ./memstore/...` green.
-- [ ] `go vet ./...` clean.
-- [ ] Optional: `var _ messaging.Store = (*memstore.Store)(nil)` compile-time
+- [x] All five tasks ticked and committed on `feat/s02-memstore`.
+- [x] `go test -race -count=1 ./memstore/...` green.
+- [x] `go vet ./...` clean.
+- [x] Optional: `var _ messaging.Store = (*memstore.Store)(nil)` compile-time
       assertion added to `memstore/memstore.go`. (Belt-and-suspenders for
       interface satisfaction — will prevent S03 surprises.)
 - [ ] Branch FF-merged into `main`, feature branch deleted.
