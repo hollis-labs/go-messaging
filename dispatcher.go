@@ -37,11 +37,12 @@ func (d *dispatcher) Request(ctx context.Context, env Envelope) (Envelope, error
 	env.ID = "" // force Store to assign fresh ID
 
 	// Subscribe BEFORE Send so we don't miss a fast response.
-	// Filter on Kind=response; we'll match InReplyTo after.
+	// Subscribe as the requester (env.From): we receive responses addressed
+	// to us, then filter by InReplyTo to match concurrent in-flight requests.
 	subCtx, subCancel := context.WithCancel(ctx)
 	defer subCancel()
 
-	sub, err := d.Subscribe(subCtx, Filter{Kind: []Kind{MsgKindResponse}})
+	sub, err := d.Subscribe(subCtx, env.From, Filter{Kind: []Kind{MsgKindResponse}})
 	if err != nil {
 		return Envelope{}, err
 	}

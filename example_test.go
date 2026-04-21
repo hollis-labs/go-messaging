@@ -22,9 +22,9 @@ func Example() {
 	A := messaging.Address{Kind: messaging.KindAgent, Authority: "app", ID: "alice"}
 	B := messaging.Address{Kind: messaging.KindAgent, Authority: "app", ID: "bob"}
 
-	// Bob subscribes to requests and auto-responds.
+	// Bob subscribes to requests addressed to him and auto-responds.
 	go func() {
-		sub, err := store.Subscribe(ctx, messaging.Filter{
+		sub, err := store.Subscribe(ctx, B, messaging.Filter{
 			Kind: []messaging.Kind{messaging.MsgKindRequest},
 		})
 		if err != nil {

@@ -113,6 +113,10 @@ func (s *Store) fanOut(env messaging.Envelope) {
 	s.mu.Unlock()
 
 	for _, sub := range subs {
+		// Recipient filter: subscriber declared who they are.
+		if !sub.to.IsZero() && sub.to != env.To {
+			continue
+		}
 		if !sub.filter.Matches(env) {
 			continue
 		}
@@ -241,11 +245,12 @@ func (s *Store) Cancel(_ context.Context, id string) error {
 }
 
 // Subscribe returns a channel that receives newly-created envelopes
-// matching the filter. Closes when ctx is canceled.
-func (s *Store) Subscribe(ctx context.Context, f messaging.Filter) (<-chan messaging.Envelope, error) {
+// addressed to `to` and matching the filter. Closes when ctx is canceled.
+func (s *Store) Subscribe(ctx context.Context, to messaging.Address, f messaging.Filter) (<-chan messaging.Envelope, error) {
 	// Buffered modestly so slow consumers don't block the producer for a tick.
 	// If a subscriber is too slow, fanOut drops (see comment there).
 	sub := &subscription{
+		to:     to,
 		ch:     make(chan messaging.Envelope, 16),
 		filter: f,
 		ctx:    ctx,
@@ -273,6 +278,7 @@ func (s *Store) Subscribe(ctx context.Context, f messaging.Filter) (<-chan messa
 }
 
 type subscription struct {
+	to     messaging.Address
 	ch     chan messaging.Envelope
 	filter messaging.Filter
 	ctx    context.Context

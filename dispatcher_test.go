@@ -62,16 +62,13 @@ func TestDispatcher_Request_ReceivesResponse(t *testing.T) {
 	A := addr(messaging.KindAgent, "A")
 	B := addr(messaging.KindAgent, "B")
 
-	// Goroutine B: subscribe for requests, respond to each.
+	// Goroutine B: subscribe for requests addressed to B, respond to each.
 	go func() {
-		sub, err := s.Subscribe(ctx, messaging.Filter{Kind: []messaging.Kind{messaging.MsgKindRequest}})
+		sub, err := s.Subscribe(ctx, B, messaging.Filter{Kind: []messaging.Kind{messaging.MsgKindRequest}})
 		if err != nil {
 			return
 		}
 		for req := range sub {
-			if req.To != B {
-				continue
-			}
 			_, _ = d.Reply(ctx, req, json.RawMessage(`{"answer":42}`))
 			return
 		}

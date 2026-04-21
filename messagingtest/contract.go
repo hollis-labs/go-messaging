@@ -144,12 +144,17 @@ func RunContract(t *testing.T, factory Factory) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		_, _ = s.Send(ctx, basicEnv()) // historical
+		sub := recipient("sub1")
+		historical := basicEnv()
+		historical.To = sub
+		_, _ = s.Send(ctx, historical) // historical — must not appear
 
-		ch, err := s.Subscribe(ctx, messaging.Filter{})
+		ch, err := s.Subscribe(ctx, sub, messaging.Filter{})
 		must(t, err)
 
-		sent, _ := s.Send(ctx, basicEnv())
+		live := basicEnv()
+		live.To = sub
+		sent, _ := s.Send(ctx, live)
 
 		select {
 		case got := <-ch:
@@ -161,10 +166,41 @@ func RunContract(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("Subscribe filters to recipient only", func(t *testing.T) {
+		s := factory(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		alice := recipient("subAlice")
+		bob := recipient("subBob")
+
+		ch, err := s.Subscribe(ctx, alice, messaging.Filter{})
+		must(t, err)
+
+		// Send to Bob — should NOT appear on Alice's subscription.
+		bobEnv := basicEnv()
+		bobEnv.To = bob
+		_, _ = s.Send(ctx, bobEnv)
+
+		// Send to Alice — SHOULD appear.
+		aliceEnv := basicEnv()
+		aliceEnv.To = alice
+		sent, _ := s.Send(ctx, aliceEnv)
+
+		select {
+		case got := <-ch:
+			if got.ID != sent.ID {
+				t.Errorf("received %s, want %s (bob's message leaked)", got.ID, sent.ID)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no envelope within 1s")
+		}
+	})
+
 	t.Run("Subscribe ctx cancel closes channel", func(t *testing.T) {
 		s := factory(t)
 		ctx, cancel := context.WithCancel(context.Background())
-		ch, _ := s.Subscribe(ctx, messaging.Filter{})
+		ch, _ := s.Subscribe(ctx, recipient("subCtx"), messaging.Filter{})
 		cancel()
 		select {
 		case _, ok := <-ch:
@@ -186,15 +222,14 @@ func RunContract(t *testing.T, factory Factory) {
 		B := recipient("rqB")
 
 		go func() {
-			sub, err := s.Subscribe(ctx, messaging.Filter{Kind: []messaging.Kind{messaging.MsgKindRequest}})
+			// Bob subscribes to requests addressed to him.
+			sub, err := s.Subscribe(ctx, B, messaging.Filter{Kind: []messaging.Kind{messaging.MsgKindRequest}})
 			if err != nil {
 				return
 			}
 			for r := range sub {
-				if r.To == B {
-					_, _ = d.Reply(ctx, r, json.RawMessage(`"pong"`))
-					return
-				}
+				_, _ = d.Reply(ctx, r, json.RawMessage(`"pong"`))
+				return
 			}
 		}()
 		time.Sleep(10 * time.Millisecond)

@@ -55,12 +55,18 @@ type Store interface {
 	// Idempotent.
 	Cancel(ctx context.Context, id string) error
 
-	// Subscribe streams newly-created envelopes matching the filter until
-	// ctx is canceled. The returned channel closes when ctx is done.
+	// Subscribe streams newly-created envelopes addressed to `to` and
+	// matching the filter until ctx is canceled. The returned channel
+	// closes when ctx is done.
+	//
+	// Symmetry with Inbox: both take an explicit recipient address so
+	// subscribers always have a declared identity. HTTP-backed Stores
+	// use `to` to scope the SSE stream to a single recipient without
+	// leaking traffic across agents.
 	//
 	// Guarantees: matches envelopes created AFTER subscription time only
 	// (no historical replay — use Inbox for that).
-	Subscribe(ctx context.Context, f Filter) (<-chan Envelope, error)
+	Subscribe(ctx context.Context, to Address, f Filter) (<-chan Envelope, error)
 }
 
 // Dispatcher is the higher-level convenience API.

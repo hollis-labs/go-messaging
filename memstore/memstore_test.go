@@ -314,7 +314,7 @@ func TestMemstore_Subscribe_LiveOnly(t *testing.T) {
 	// Historical envelope (pre-subscribe) — should NOT be replayed.
 	_, _ = s.Send(ctx, messaging.Envelope{Kind: messaging.MsgKindNotice, From: from, To: to})
 
-	ch, err := s.Subscribe(ctx, messaging.Filter{})
+	ch, err := s.Subscribe(ctx, to, messaging.Filter{})
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestMemstore_Subscribe_FiltersApply(t *testing.T) {
 	from := newAddr(messaging.KindAgent, "s")
 	to := newAddr(messaging.KindAgent, "r")
 
-	ch, _ := s.Subscribe(ctx, messaging.Filter{Kind: []messaging.Kind{messaging.MsgKindRequest}})
+	ch, _ := s.Subscribe(ctx, to, messaging.Filter{Kind: []messaging.Kind{messaging.MsgKindRequest}})
 	_, _ = s.Send(ctx, messaging.Envelope{Kind: messaging.MsgKindNotice, From: from, To: to})
 	sent, _ := s.Send(ctx, messaging.Envelope{Kind: messaging.MsgKindRequest, From: from, To: to})
 
@@ -357,7 +357,8 @@ func TestMemstore_Subscribe_FiltersApply(t *testing.T) {
 func TestMemstore_Subscribe_CtxCancelClosesChannel(t *testing.T) {
 	s := New()
 	ctx, cancel := context.WithCancel(context.Background())
-	ch, _ := s.Subscribe(ctx, messaging.Filter{})
+	subscriber := newAddr(messaging.KindAgent, "ctxsub")
+	ch, _ := s.Subscribe(ctx, subscriber, messaging.Filter{})
 	cancel()
 
 	select {
@@ -378,8 +379,8 @@ func TestMemstore_Subscribe_MultipleSubscribers(t *testing.T) {
 	from := newAddr(messaging.KindAgent, "s")
 	to := newAddr(messaging.KindAgent, "r")
 
-	ch1, _ := s.Subscribe(ctx, messaging.Filter{})
-	ch2, _ := s.Subscribe(ctx, messaging.Filter{})
+	ch1, _ := s.Subscribe(ctx, to, messaging.Filter{})
+	ch2, _ := s.Subscribe(ctx, to, messaging.Filter{})
 
 	_, _ = s.Send(ctx, messaging.Envelope{Kind: messaging.MsgKindNotice, From: from, To: to})
 
