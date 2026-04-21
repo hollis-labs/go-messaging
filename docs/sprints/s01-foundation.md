@@ -13,15 +13,15 @@ tests written here pass, and no `Store` implementation exists yet.
 
 ## Exit criteria
 
-- [ ] `go.mod` initialized at `github.com/hollis-labs/go-messaging` with `google/uuid v1.6+`
-- [ ] `LICENSE`, `README.md` (skeleton), `.gitignore`, `Makefile`, `doc.go` committed
-- [ ] `messaging.go`: `AddressKind` + `Address` + `IsZero` + message `Kind` + `Channel` + `Envelope` + `Filter` + `Filter.Matches`
-- [ ] `urn.go`: `Address.URN()` + `ParseURN(string)` with `ErrInvalidAddress`
-- [ ] `store.go`: `Store` + `Dispatcher` interfaces + all error sentinels (`ErrNotFound`, `ErrRequestTimeout`, `ErrCanceled`, `ErrStoreUnavailable`, `ErrPresetLifecycle`)
-- [ ] Address JSON (un)marshals as URN string (custom `MarshalJSON` / `UnmarshalJSON`)
-- [ ] Envelope JSON round-trips cleanly: Payload inline (not base64), `DeliveredAt`/`ConsumedAt` always present (null when nil), `channel`/`thread_id`/`in_reply_to`/`metadata` `omitempty`
-- [ ] `go test -race ./...` green (URN round-trip, Envelope JSON round-trip, Filter matching)
-- [ ] `go vet ./...` clean
+- [x] `go.mod` initialized at `github.com/hollis-labs/go-messaging` with `google/uuid v1.6+`
+- [x] `LICENSE`, `README.md` (skeleton), `.gitignore`, `Makefile`, `doc.go` committed
+- [x] `messaging.go`: `AddressKind` + `Address` + `IsZero` + message `Kind` + `Channel` + `Envelope` + `Filter` + `Filter.Matches`
+- [x] `urn.go`: `Address.URN()` + `ParseURN(string)` with `ErrInvalidAddress`
+- [x] `store.go`: `Store` + `Dispatcher` interfaces + all error sentinels (`ErrNotFound`, `ErrRequestTimeout`, `ErrCanceled`, `ErrStoreUnavailable`, `ErrPresetLifecycle`)
+- [x] Address JSON (un)marshals as URN string (custom `MarshalJSON` / `UnmarshalJSON`)
+- [x] Envelope JSON round-trips cleanly: Payload inline (not base64), `DeliveredAt`/`ConsumedAt` always present (null when nil), `channel`/`thread_id`/`in_reply_to`/`metadata` `omitempty`
+- [x] `go test -race ./...` green (URN round-trip, Envelope JSON round-trip, Filter matching)
+- [x] `go vet ./...` clean
 
 ## Tasks
 
@@ -34,11 +34,11 @@ commit. Tick the checkbox here after the commit lands.
 
 **Priority:** 1. **Tags:** scaffold, chore. **Plan Task:** 1 (steps 1.1–1.8).
 
-- [ ] `go mod init github.com/hollis-labs/go-messaging`
-- [ ] `go get github.com/google/uuid@v1.6.0`
-- [ ] `LICENSE` (copy from `framework/libs/go-agentmux-client/LICENSE` verbatim)
-- [ ] `.gitignore`, `Makefile` (runs `fmt vet lint test-race vuln`), `doc.go`, skeleton `README.md`
-- [ ] Commit: `chore: initialize go-messaging repo`
+- [x] `go mod init github.com/hollis-labs/go-messaging`
+- [x] `go get github.com/google/uuid@v1.6.0`
+- [x] `LICENSE` (copy from `framework/libs/go-agentmux-client/LICENSE` verbatim)
+- [x] `.gitignore`, `Makefile` (runs `fmt vet lint test-race vuln`), `doc.go`, skeleton `README.md`
+- [x] Commit: `chore: initialize go-messaging repo`
 
 **Readiness notes:**
 - Repo is already `git init`'d. If step 1.1's `git init` errors, skip to `git remote add`.
@@ -54,12 +54,12 @@ commit. Tick the checkbox here after the commit lands.
 **Priority:** 1. **Tags:** types, urn. **Plan Task:** 2 (steps 2.1–2.6).
 
 TDD:
-- [ ] Write `urn_test.go`: `TestAddress_URN_RoundTrip` (6 cases: agent with/without subid, user, service, session, workflow) + `TestParseURN_Errors` (9 malformed inputs)
-- [ ] Run tests → compile error (types undefined)
-- [ ] Write `messaging.go` with `AddressKind` const block + `Address` struct + `IsZero()` method
-- [ ] Write `urn.go` with `ErrInvalidAddress` + `urnScheme = "msg://"` + `validKinds` map + `URN()` + `ParseURN()`
-- [ ] Tests green under `-race`
-- [ ] Commit: `feat(messaging): Address type + URN parse/format round-trip`
+- [x] Write `urn_test.go`: `TestAddress_URN_RoundTrip` (6 cases: agent with/without subid, user, service, session, workflow) + `TestParseURN_Errors` (9 malformed inputs)
+- [x] Run tests → compile error (types undefined)
+- [x] Write `messaging.go` with `AddressKind` const block + `Address` struct + `IsZero()` method
+- [x] Write `urn.go` with `ErrInvalidAddress` + `urnScheme = "msg://"` + `validKinds` map + `URN()` + `ParseURN()`
+- [x] Tests green under `-race`
+- [x] Commit: `feat(messaging): Address type + URN parse/format round-trip`
 
 **Reference details (spec §Core types, §Naming conventions):**
 - Canonical form: `msg://<kind>/<authority>/<id>[/<subid>]`
@@ -74,12 +74,12 @@ TDD:
 **Priority:** 1. **Tags:** types, json. **Plan Task:** 3 (steps 3.1–3.5).
 
 TDD:
-- [ ] Write `messaging_test.go`: `TestEnvelope_JSONRoundTrip` + `TestEnvelope_JSONOmitEmpty` + `containsAll` helper
-- [ ] Run → compile error (Envelope / `MsgKindRequest` undefined)
-- [ ] Extend `messaging.go` with message `Kind` const block (`MsgKindRequest`/`MsgKindResponse`/`MsgKindNotice`/`MsgKindStatusUpdate`/`MsgKindHandoff`/`MsgKindEscalation`), `Channel` type, `Envelope` struct with JSON tags
-- [ ] Add `Address.MarshalJSON` + `Address.UnmarshalJSON` (serialize as URN string, not as object)
-- [ ] Tests green under `-race`
-- [ ] Commit: `feat(messaging): Envelope type + JSON round-trip, Address URN marshaling`
+- [x] Write `messaging_test.go`: `TestEnvelope_JSONRoundTrip` + `TestEnvelope_JSONOmitEmpty` + `containsAll` helper
+- [x] Run → compile error (Envelope / `MsgKindRequest` undefined)
+- [x] Extend `messaging.go` with message `Kind` const block (`MsgKindRequest`/`MsgKindResponse`/`MsgKindNotice`/`MsgKindStatusUpdate`/`MsgKindHandoff`/`MsgKindEscalation`), `Channel` type, `Envelope` struct with JSON tags
+- [x] Add `Address.MarshalJSON` + `Address.UnmarshalJSON` (serialize as URN string, not as object)
+- [x] Tests green under `-race`
+- [x] Commit: `feat(messaging): Envelope type + JSON round-trip, Address URN marshaling`
 
 **Envelope JSON tags (critical — the spec's wire contract):**
 - `id`, `kind`, `from`, `to`, `created_at` — always present
@@ -96,11 +96,11 @@ TDD:
 **Priority:** 2. **Tags:** types. **Plan Task:** 4 (steps 4.1–4.5).
 
 TDD:
-- [ ] Append `TestFilter_Matches` to `messaging_test.go` (10 cases covering AND/OR/empty-matches-all)
-- [ ] Run → compile error (`Filter` undefined)
-- [ ] Append `Filter` struct + `Matches(Envelope) bool` to `messaging.go`
-- [ ] Tests green
-- [ ] Commit: `feat(messaging): Filter type + Matches helper with AND/OR semantics`
+- [x] Append `TestFilter_Matches` to `messaging_test.go` (10 cases covering AND/OR/empty-matches-all)
+- [x] Run → compile error (`Filter` undefined)
+- [x] Append `Filter` struct + `Matches(Envelope) bool` to `messaging.go`
+- [x] Tests green
+- [x] Commit: `feat(messaging): Filter type + Matches helper with AND/OR semantics`
 
 **Semantic rule (spec §Interfaces):**
 - Set fields AND-combine. Within a slice field, values OR-combine.
@@ -117,11 +117,11 @@ TDD:
 
 No tests this task (interfaces are exercised via impls in S02/S03).
 
-- [ ] Create `store.go` with error sentinels (`ErrNotFound`, `ErrRequestTimeout`, `ErrCanceled`, `ErrStoreUnavailable`, `ErrPresetLifecycle`)
-- [ ] `Store` interface: `Send`, `Get`, `Inbox`, `Thread`, `Consume`, `Cancel`, `Subscribe`
-- [ ] `Dispatcher` interface (embeds `Store`): `Request`, `Reply`
-- [ ] `go vet ./...` clean
-- [ ] Commit: `feat(messaging): Store + Dispatcher interfaces + error sentinels`
+- [x] Create `store.go` with error sentinels (`ErrNotFound`, `ErrRequestTimeout`, `ErrCanceled`, `ErrStoreUnavailable`, `ErrPresetLifecycle`)
+- [x] `Store` interface: `Send`, `Get`, `Inbox`, `Thread`, `Consume`, `Cancel`, `Subscribe`
+- [x] `Dispatcher` interface (embeds `Store`): `Request`, `Reply`
+- [x] `go vet ./...` clean
+- [x] Commit: `feat(messaging): Store + Dispatcher interfaces + error sentinels`
 
 **Interface docs are load-bearing — copy verbatim from plan §Task 5.1.** They
 are the contract every Store impl in the portfolio must honor, including:
@@ -142,8 +142,8 @@ are the contract every Store impl in the portfolio must honor, including:
 
 ## Readiness checklist before S02 opens
 
-- [ ] All five tasks ticked and committed.
-- [ ] `go test -race ./...` green, `go vet ./...` clean.
+- [x] All five tasks ticked and committed.
+- [x] `go test -race ./...` green, `go vet ./...` clean.
 - [ ] Branch FF-merged into `main`, feature branch deleted.
 - [ ] Update epic `## Sprint map` if naming drifted.
 
