@@ -41,12 +41,12 @@ func (d *dispatcher) Request(ctx context.Context, env Envelope) (Envelope, error
 	subCtx, subCancel := context.WithCancel(ctx)
 	defer subCancel()
 
-	sub, err := d.Store.Subscribe(subCtx, Filter{Kind: []Kind{MsgKindResponse}})
+	sub, err := d.Subscribe(subCtx, Filter{Kind: []Kind{MsgKindResponse}})
 	if err != nil {
 		return Envelope{}, err
 	}
 
-	sent, err := d.Store.Send(ctx, env)
+	sent, err := d.Send(ctx, env)
 	if err != nil {
 		return Envelope{}, err
 	}
