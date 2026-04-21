@@ -160,11 +160,39 @@ func sortByCreatedAtAndID(xs []*memEnvelope) {
 func (s *Store) Thread(context.Context, string, messaging.Filter) ([]messaging.Envelope, error) {
 	return nil, fmt.Errorf("memstore: Thread not yet implemented")
 }
-func (s *Store) Consume(context.Context, string, messaging.Address) error {
-	return fmt.Errorf("memstore: Consume not yet implemented")
+// Consume advances ConsumedAt for (envelope, recipient). Idempotent.
+func (s *Store) Consume(_ context.Context, id string, recipient messaging.Address) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, ok := s.envelopes[id]
+	if !ok {
+		return messaging.ErrNotFound
+	}
+	rURN := recipient.URN()
+	if _, already := m.consumed[rURN]; already {
+		return nil // idempotent
+	}
+	now := time.Now().UTC()
+	m.consumed[rURN] = now
+	// Mirror onto the Envelope.ConsumedAt so Get reflects consumption.
+	// memstore uses the most-recent consumption timestamp; multi-recipient
+	// scenarios should read from Get + inspect per-recipient state via
+	// impl-specific extensions (not in v0.1 contract).
+	t := now
+	m.env.ConsumedAt = &t
+	return nil
 }
-func (s *Store) Cancel(context.Context, string) error {
-	return fmt.Errorf("memstore: Cancel not yet implemented")
+
+// Cancel marks an envelope as dead. Resolves any in-flight Request
+// subscribers waiting on InReplyTo=<id>. Idempotent.
+func (s *Store) Cancel(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.envelopes[id]; !ok {
+		return messaging.ErrNotFound
+	}
+	s.canceled[id] = true
+	return nil
 }
 func (s *Store) Subscribe(context.Context, messaging.Filter) (<-chan messaging.Envelope, error) {
 	return nil, fmt.Errorf("memstore: Subscribe not yet implemented")
