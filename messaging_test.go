@@ -100,3 +100,36 @@ func containsAll(haystack string, needles ...string) bool {
 	}
 	return true
 }
+
+func TestFilter_Matches(t *testing.T) {
+	env := Envelope{
+		Kind:     MsgKindRequest,
+		Channel:  "chat",
+		ThreadID: "T1",
+	}
+
+	cases := []struct {
+		name   string
+		filter Filter
+		want   bool
+	}{
+		{"empty matches all", Filter{}, true},
+		{"kind match", Filter{Kind: []Kind{MsgKindRequest}}, true},
+		{"kind no-match", Filter{Kind: []Kind{MsgKindResponse}}, false},
+		{"kind OR match", Filter{Kind: []Kind{MsgKindResponse, MsgKindRequest}}, true},
+		{"channel match", Filter{Channel: []Channel{"chat"}}, true},
+		{"channel no-match", Filter{Channel: []Channel{"inbox"}}, false},
+		{"thread match", Filter{ThreadID: "T1"}, true},
+		{"thread no-match", Filter{ThreadID: "T2"}, false},
+		{"AND: all match", Filter{Kind: []Kind{MsgKindRequest}, Channel: []Channel{"chat"}, ThreadID: "T1"}, true},
+		{"AND: kind mismatch", Filter{Kind: []Kind{MsgKindResponse}, Channel: []Channel{"chat"}, ThreadID: "T1"}, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.filter.Matches(env); got != tc.want {
+				t.Errorf("Matches = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

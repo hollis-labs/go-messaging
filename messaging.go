@@ -86,3 +86,48 @@ type Envelope struct {
 	DeliveredAt *time.Time        `json:"delivered_at"`
 	ConsumedAt  *time.Time        `json:"consumed_at"`
 }
+
+// Filter narrows Inbox/Thread/Subscribe result sets.
+// Set fields are AND-combined; within a slice, values are OR-combined.
+//
+//	Filter{Kind: []Kind{MsgKindRequest, MsgKindHandoff}, ThreadID: "T1"}
+//
+// matches envelopes in thread T1 whose Kind is request OR handoff.
+type Filter struct {
+	Kind     []Kind    `json:"kind,omitempty"`
+	Channel  []Channel `json:"channel,omitempty"`
+	ThreadID string    `json:"thread_id,omitempty"`
+	Limit    int       `json:"limit,omitempty"`
+}
+
+// Matches reports whether env satisfies the filter.
+func (f Filter) Matches(env Envelope) bool {
+	if len(f.Kind) > 0 {
+		ok := false
+		for _, k := range f.Kind {
+			if env.Kind == k {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return false
+		}
+	}
+	if len(f.Channel) > 0 {
+		ok := false
+		for _, c := range f.Channel {
+			if env.Channel == c {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return false
+		}
+	}
+	if f.ThreadID != "" && env.ThreadID != f.ThreadID {
+		return false
+	}
+	return true
+}
