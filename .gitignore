@@ -1,0 +1,13 @@
+# Go
+*.test
+*.out
+*.prof
+/bin/
+/vendor/
+coverage.txt
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
