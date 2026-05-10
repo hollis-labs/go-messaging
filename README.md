@@ -1,23 +1,29 @@
 # go-messaging
 
-Shared messaging contract for the `hollis-labs` agent portfolio.
+[![Go Reference](https://pkg.go.dev/badge/github.com/hollis-labs/go-messaging.svg)](https://pkg.go.dev/github.com/hollis-labs/go-messaging)
+
+A shared Go contract for agent-to-agent, agent-to-service, and
+agent-to-user messaging.
 
 `go-messaging` defines the types (`Envelope`, `Address`, `Kind`,
-`Channel`), interfaces (`Store`, `Dispatcher`), and delivery semantics
-used by every agent-to-agent, agent-to-service, and agent-to-user
-message in the portfolio. It ships an in-memory reference Store and a
-shared contract test suite; concrete persistent Stores live in
-consumer projects (agent-mux for cross-system runtime, Nanite for
-app-local chat).
+`Channel`, `Filter`), interfaces (`Store`, `Dispatcher`), and delivery
+semantics so multiple applications can speak the same wire protocol.
+It ships an in-memory reference `Store`, a request/reply `Dispatcher`,
+and a shared contract test suite that any third-party `Store` should
+pass. Concrete persistent / networked `Store` implementations are
+provided by consumer applications.
 
-**Status:** v0.1 — see the design spec for the full rationale and the
-four-phase rollout plan.
+**Status:** pre-1.0 (`v0.x.y`). The contract surface is stable, but
+breaking changes may still occur in minor versions; see
+[CHANGELOG.md](./CHANGELOG.md).
 
 ## Install
 
 ```bash
-go get github.com/hollis-labs/go-messaging@v0.1.0
+go get github.com/hollis-labs/go-messaging
 ```
+
+Requires Go 1.22 or newer.
 
 ## Quick start
 
@@ -25,6 +31,7 @@ go get github.com/hollis-labs/go-messaging@v0.1.0
 import (
     "context"
     "encoding/json"
+
     "github.com/hollis-labs/go-messaging"
     "github.com/hollis-labs/go-messaging/memstore"
 )
@@ -39,7 +46,8 @@ resp, err := disp.Request(ctx, messaging.Envelope{
 })
 ```
 
-See `example_test.go` for a complete runnable demo.
+See [`example_test.go`](./example_test.go) for a complete runnable demo
+and [`examples/`](./examples) for standalone programs.
 
 ## Address model
 
@@ -49,18 +57,18 @@ Addresses are typed structs serialized as URNs on the wire:
 
 Examples:
 
-    msg://agent/agent-mux/sess-abc/primary
-    msg://user/nanite/chrispian
-    msg://service/clockwork/scheduler
+    msg://agent/router/sess-abc/primary
+    msg://user/app/alice
+    msg://service/scheduler/main
 
 `AddressKind` is a closed enum (`agent`, `user`, `service`, `session`,
-`workflow`). `Authority` identifies the owning system. `ID` is the primary
-identifier within that authority; `SubID` is optional (e.g., agent-within-
-session).
+`workflow`). `Authority` identifies the owning system. `ID` is the
+primary identifier within that authority; `SubID` is optional (e.g.,
+an agent-within-a-session).
 
 ## Message Kinds
 
-Kind is a closed enum; the shared package routes on it:
+`Kind` is a closed enum; the shared package routes on it:
 
 - `request` — expects a response
 - `response` — answers a request (must set `InReplyTo`)
@@ -69,32 +77,34 @@ Kind is a closed enum; the shared package routes on it:
 - `handoff` — transfer of responsibility
 - `escalation` — lift to higher authority
 
-`Channel` is an opaque UX-layer pass-through; apps define their own
-vocabulary (e.g., `chat`, `inbox`, `alert`). The shared package never
-interprets it.
+`Channel` is an opaque UX-layer pass-through; applications define
+their own vocabulary (e.g., `chat`, `inbox`, `alert`). The shared
+package never interprets it.
 
 ## Delivery semantics
 
 Exactly-once-per-recipient via `DeliveredAt` + `ConsumedAt` tracking:
 
 1. `Send` persists an envelope (CREATED).
-2. `Inbox(to)` returns undelivered envelopes AND atomically marks them
-   DELIVERED for that recipient.
-3. Consumer calls `Consume(id, recipient)` after processing (CONSUMED).
+2. `Inbox(to)` returns undelivered envelopes AND atomically marks
+   them DELIVERED for that recipient.
+3. Consumer calls `Consume(id, recipient)` after processing
+   (CONSUMED).
 
-Crashing between Inbox and Consume means the envelope stays DELIVERED
-(does not re-appear in Inbox). Consumers that need at-least-once should
-wrap the Dispatcher in their own retry layer.
+Crashing between Inbox and Consume means the envelope stays
+DELIVERED (does not re-appear in Inbox). Consumers that need
+at-least-once should wrap the Dispatcher in their own retry layer.
 
-## Writing a new Store impl
+## Writing a new Store implementation
 
-Any Store impl must pass the shared contract test suite:
+Any `Store` implementation must pass the shared contract test suite:
 
 ```go
 package mystore_test
 
 import (
     "testing"
+
     "github.com/hollis-labs/go-messaging"
     "github.com/hollis-labs/go-messaging/messagingtest"
     "github.com/example/mystore"
@@ -102,28 +112,30 @@ import (
 
 func TestMystore_Contract(t *testing.T) {
     messagingtest.RunContract(t, func(t *testing.T) messaging.Store {
-        return mystore.New(...)
+        return mystore.New(/* ... */)
     })
 }
 ```
 
-All 13 sub-tests must pass for an impl to be contract-conformant.
+All sub-tests must pass for an implementation to be
+contract-conformant.
 
 ## Scope
 
-- **In scope v0.1:** contract types, interfaces, delivery lifecycle,
-  URN addressing, in-memory reference Store, contract test suite,
-  Dispatcher request/reply helper.
-- **Out of scope v0.1 (explicitly):** authn/authz, escalation routing,
-  cross-daemon federation, retry/backoff, tracing hooks, large-binary
-  payloads.
+**In scope:** contract types, interfaces, delivery lifecycle, URN
+addressing, in-memory reference Store, contract test suite, Dispatcher
+request/reply helper.
 
-See the design spec for full scope-fence rationale.
+**Out of scope (explicitly):** authentication/authorization, escalation
+routing, cross-daemon federation, retry/backoff, tracing hooks,
+large-binary payloads. These belong in higher layers built on top of
+`Store`.
 
-## Design reference
+## Documentation
 
-`agent-workspaces/docs/superpowers/specs/2026-04-20-messaging-design.md`
+Full API reference on
+[pkg.go.dev/github.com/hollis-labs/go-messaging](https://pkg.go.dev/github.com/hollis-labs/go-messaging).
 
 ## License
 
-MIT — see LICENSE.
+MIT — see [LICENSE](./LICENSE).
