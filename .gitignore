@@ -11,3 +11,11 @@ coverage.txt
 .idea/
 *.swp
 .DS_Store
+
+# Agent / AI tooling — must not appear in this public repo
+.claude/
+.agentrc/
+agentrc.yaml
+agentrc.yml
+CLAUDE.md
+AGENTS.md

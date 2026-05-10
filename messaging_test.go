@@ -8,8 +8,8 @@ import (
 )
 
 func TestEnvelope_JSONRoundTrip(t *testing.T) {
-	from := Address{Kind: KindAgent, Authority: "nanite", ID: "chat-1"}
-	to := Address{Kind: KindAgent, Authority: "agent-mux", ID: "sess-abc", SubID: "primary"}
+	from := Address{Kind: KindAgent, Authority: "app", ID: "chat-1"}
+	to := Address{Kind: KindAgent, Authority: "router", ID: "sess-abc", SubID: "primary"}
 	created := time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC)
 	delivered := created.Add(time.Second)
 

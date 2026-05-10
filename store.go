@@ -17,7 +17,8 @@ var (
 
 // Store is the persistence + query contract for envelopes.
 //
-// All impls (memstore, agent-mux daemon client, Nanite SQLite) MUST
+// Every Store implementation — including the in-memory reference at
+// memstore/, daemon-backed clients, and SQL-backed adapters — MUST
 // satisfy this contract identically. The contract test suite at
 // github.com/hollis-labs/go-messaging/messagingtest.RunContract
 // verifies every Store impl runs through the same behavioral checks.
