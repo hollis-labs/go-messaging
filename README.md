@@ -95,6 +95,39 @@ Crashing between Inbox and Consume means the envelope stays
 DELIVERED (does not re-appear in Inbox). Consumers that need
 at-least-once should wrap the Dispatcher in their own retry layer.
 
+## Federation
+
+The `Authority` segment of every URN is the email-style "domain" that owns
+the addressed entity. `Router` is a `Store` decorator that turns it into a
+routing seam, so any app gets federated messaging for free:
+
+```go
+router := messaging.NewRouter(localStore, "hq")  // localStore serves "hq"
+router.Register("branch", branchStore)           // foreign authority → its Store
+disp := messaging.NewDispatcher(router)          // federated request/reply
+```
+
+- An operation whose authority has a **registered foreign route** is
+  dispatched to that route's `Store` — typically an HTTP-backed `Store`
+  reaching the host that owns the authority.
+- Every other authority **falls through to the local `Store`**.
+
+"Internal vs external" thus collapses to a single routing question —
+`router.IsLocal(authority)` — rather than a schema fork. A **standalone
+install registers no foreign routes**: every authority resolves to the local
+`Store` and messaging works fully locally with zero extra configuration.
+Federation is purely additive — the same code path serves both deployments.
+
+Routing is keyed on the **recipient** authority: `Send` on `To`, `Inbox` /
+`Subscribe` on the recipient, `Consume` on the recipient. `Get`, `Thread`,
+and `Cancel` are keyed by an envelope/thread ID — which carries no
+authority — and are served from the local `Store`.
+
+`WithStrictRouting()` makes the `Router` return `ErrNoRoute` for an authority
+that is neither local nor registered, instead of falling through. The
+network transport for a foreign hop, and any cross-host authentication, are
+supplied by the foreign `Store` itself — `Router` only decides the route.
+
 ## Writing a new Store implementation
 
 Any `Store` implementation must pass the shared contract test suite:
@@ -118,18 +151,21 @@ func TestMystore_Contract(t *testing.T) {
 ```
 
 All sub-tests must pass for an implementation to be
-contract-conformant.
+contract-conformant. A `Store` that will sit behind a `Router` should also
+run `messagingtest.RunRouterContract`, which verifies the authority-routing
+guarantees on top of the base contract.
 
 ## Scope
 
 **In scope:** contract types, interfaces, delivery lifecycle, URN
 addressing, in-memory reference Store, contract test suite, Dispatcher
-request/reply helper.
+request/reply helper, the authority-routing `Router` decorator.
 
 **Out of scope (explicitly):** authentication/authorization, escalation
-routing, cross-daemon federation, retry/backoff, tracing hooks,
-large-binary payloads. These belong in higher layers built on top of
-`Store`.
+routing, cross-host transport (the foreign `Store` behind a `Router` route
+is app-supplied — e.g. an HTTP client), federation authentication,
+retry/backoff, tracing hooks, large-binary payloads. These belong in higher
+layers built on top of `Store`.
 
 ## Documentation
 

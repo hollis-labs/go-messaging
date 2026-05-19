@@ -257,6 +257,178 @@ func RunContract(t *testing.T, factory Factory) {
 	})
 }
 
+// RunRouterContract verifies messaging.Router's authority-routing
+// guarantees layered on top of the base Store contract:
+//
+//   - a Router is itself a contract-conformant Store;
+//   - the local authority falls through to the local Store;
+//   - a registered foreign authority dispatches to that route's Store;
+//   - Send, Inbox, and Consume are keyed on the recipient authority;
+//   - IsLocal/Authorities track the route registry; Register validates;
+//   - strict routing returns ErrNoRoute for unknown authorities.
+//
+// factory supplies a fresh backing Store per call. RunRouterContract calls
+// it independently for the local and foreign sides, so the two Stores never
+// share state. Run it from a Store impl's own test file alongside
+// RunContract:
+//
+//	func TestMystore_Router(t *testing.T) {
+//	    messagingtest.RunRouterContract(t, func(t *testing.T) messaging.Store {
+//	        return mystore.New(/* ... */)
+//	    })
+//	}
+func RunRouterContract(t *testing.T, factory Factory) {
+	t.Helper()
+
+	const (
+		localAuth   = "local"
+		foreignAuth = "remote"
+	)
+	addr := func(auth, id string) messaging.Address {
+		return messaging.Address{Kind: messaging.KindAgent, Authority: auth, ID: id}
+	}
+	notice := func(from, to messaging.Address) messaging.Envelope {
+		return messaging.Envelope{Kind: messaging.MsgKindNotice, From: from, To: to}
+	}
+
+	t.Run("Router satisfies the Store contract", func(t *testing.T) {
+		RunContract(t, func(t *testing.T) messaging.Store {
+			return messaging.NewRouter(factory(t), "test")
+		})
+	})
+
+	t.Run("local authority falls through to the local Store", func(t *testing.T) {
+		local := factory(t)
+		r := messaging.NewRouter(local, localAuth)
+		ctx := context.Background()
+		to := addr(localAuth, "a")
+		if _, err := r.Send(ctx, notice(addr(localAuth, "b"), to)); err != nil {
+			t.Fatal(err)
+		}
+		got, err := local.Inbox(ctx, to, messaging.Filter{})
+		must(t, err)
+		if len(got) != 1 {
+			t.Fatalf("local Inbox: got %d, want 1", len(got))
+		}
+	})
+
+	t.Run("foreign authority dispatches to the registered route", func(t *testing.T) {
+		local, foreign := factory(t), factory(t)
+		r := messaging.NewRouter(local, localAuth)
+		must(t, r.Register(foreignAuth, foreign))
+
+		ctx := context.Background()
+		to := addr(foreignAuth, "a")
+		if _, err := r.Send(ctx, notice(addr(localAuth, "b"), to)); err != nil {
+			t.Fatal(err)
+		}
+
+		fgot, err := foreign.Inbox(ctx, to, messaging.Filter{})
+		must(t, err)
+		if len(fgot) != 1 {
+			t.Fatalf("foreign Inbox: got %d, want 1", len(fgot))
+		}
+		lgot, err := local.Inbox(ctx, addr(localAuth, "a"), messaging.Filter{})
+		must(t, err)
+		if len(lgot) != 0 {
+			t.Errorf("local Store received a foreign-addressed envelope: got %d", len(lgot))
+		}
+	})
+
+	t.Run("Inbox is routed by recipient authority", func(t *testing.T) {
+		local, foreign := factory(t), factory(t)
+		r := messaging.NewRouter(local, localAuth)
+		must(t, r.Register(foreignAuth, foreign))
+		ctx := context.Background()
+
+		to := addr(foreignAuth, "a")
+		if _, err := r.Send(ctx, notice(addr(localAuth, "b"), to)); err != nil {
+			t.Fatal(err)
+		}
+		got, err := r.Inbox(ctx, to, messaging.Filter{})
+		must(t, err)
+		if len(got) != 1 {
+			t.Fatalf("routed Inbox: got %d, want 1", len(got))
+		}
+	})
+
+	t.Run("Consume is routed by recipient authority", func(t *testing.T) {
+		local, foreign := factory(t), factory(t)
+		r := messaging.NewRouter(local, localAuth)
+		must(t, r.Register(foreignAuth, foreign))
+		ctx := context.Background()
+
+		to := addr(foreignAuth, "a")
+		sent, err := r.Send(ctx, notice(addr(localAuth, "b"), to))
+		must(t, err)
+		if _, err := r.Inbox(ctx, to, messaging.Filter{}); err != nil {
+			t.Fatal(err)
+		}
+		must(t, r.Consume(ctx, sent.ID, to))
+
+		got, err := foreign.Get(ctx, sent.ID)
+		must(t, err)
+		if got.ConsumedAt == nil {
+			t.Error("Consume did not reach the foreign Store")
+		}
+	})
+
+	t.Run("IsLocal and Authorities track the registry", func(t *testing.T) {
+		r := messaging.NewRouter(factory(t), localAuth)
+		if !r.IsLocal(localAuth) {
+			t.Error("local authority should be local")
+		}
+		if !r.IsLocal(foreignAuth) {
+			t.Error("unregistered authority should be local before Register")
+		}
+		must(t, r.Register(foreignAuth, factory(t)))
+		if r.IsLocal(foreignAuth) {
+			t.Error("registered authority should not be local")
+		}
+		if got := r.Authorities(); len(got) != 1 || got[0] != foreignAuth {
+			t.Errorf("Authorities() = %v, want [%s]", got, foreignAuth)
+		}
+		r.Unregister(foreignAuth)
+		if !r.IsLocal(foreignAuth) {
+			t.Error("authority should be local again after Unregister")
+		}
+		if got := r.Authorities(); len(got) != 0 {
+			t.Errorf("Authorities() = %v, want empty after Unregister", got)
+		}
+	})
+
+	t.Run("Register rejects invalid routes", func(t *testing.T) {
+		r := messaging.NewRouter(factory(t), localAuth)
+		if err := r.Register("", factory(t)); err == nil {
+			t.Error(`Register("", ...) should fail`)
+		}
+		if err := r.Register(foreignAuth, nil); err == nil {
+			t.Error("Register(..., nil) should fail")
+		}
+		if err := r.Register(localAuth, factory(t)); err == nil {
+			t.Error("Register(localAuthority, ...) should fail")
+		}
+	})
+
+	t.Run("strict routing rejects unknown authorities", func(t *testing.T) {
+		r := messaging.NewRouter(factory(t), localAuth, messaging.WithStrictRouting())
+		ctx := context.Background()
+
+		_, err := r.Send(ctx, notice(addr(localAuth, "b"), addr("unknown", "a")))
+		if !errors.Is(err, messaging.ErrNoRoute) {
+			t.Errorf("strict Send to unknown authority: got %v, want ErrNoRoute", err)
+		}
+		_, err = r.Inbox(ctx, addr("unknown", "a"), messaging.Filter{})
+		if !errors.Is(err, messaging.ErrNoRoute) {
+			t.Errorf("strict Inbox to unknown authority: got %v, want ErrNoRoute", err)
+		}
+		// The local authority still routes fine under strict mode.
+		if _, err := r.Send(ctx, notice(addr(localAuth, "b"), addr(localAuth, "a"))); err != nil {
+			t.Errorf("strict Send to local authority: %v", err)
+		}
+	})
+}
+
 // Helpers (kept in this file so impls don't have to duplicate them).
 
 func basicEnv() messaging.Envelope {
