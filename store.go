@@ -13,6 +13,12 @@ var (
 	ErrCanceled         = errors.New("envelope canceled")
 	ErrStoreUnavailable = errors.New("store unavailable")
 	ErrPresetLifecycle  = errors.New("caller set Store-managed lifecycle fields")
+
+	// ErrNoRoute indicates an address whose Authority the Router neither
+	// serves locally nor has a registered foreign route for. Only the
+	// authority Router returns it, and only in strict mode — see Router
+	// and WithStrictRouting.
+	ErrNoRoute = errors.New("no route for authority")
 )
 
 // Store is the persistence + query contract for envelopes.

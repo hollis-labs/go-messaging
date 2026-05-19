@@ -7,6 +7,29 @@ While the major version is `0.x`, the API is considered pre-1.0 and
 breaking changes may occur in minor (`0.y`) versions; they are called
 out explicitly below.
 
+## Unreleased
+
+### Added
+- `Router` — an authority-routing `Store` decorator. It dispatches each
+  operation by the URN `Authority` segment: a registered foreign authority
+  goes to that route's `Store`, every other authority falls through to a
+  local `Store`. This promotes federated messaging into the shared library
+  so every consuming app gets it for free; a standalone install registers
+  no foreign routes and runs fully locally with no extra configuration.
+  - `NewRouter(local, localAuthority, opts...)` constructs one.
+  - `Register` / `Unregister` / `Authorities` manage foreign routes
+    (concurrency-safe; mutable while operations are in flight).
+  - `IsLocal` answers the single "internal vs external" routing question.
+  - `WithStrictRouting()` makes unknown authorities return `ErrNoRoute`
+    instead of falling through to the local `Store`.
+  - `Router` is itself a `Store`, so `NewDispatcher(router)` yields a
+    federated request/reply `Dispatcher`.
+- `ErrNoRoute` sentinel error, returned by a strict-mode `Router`.
+- `messagingtest.RunRouterContract` — a shared contract suite covering the
+  authority-routing guarantees (local fall-through, foreign dispatch,
+  recipient-keyed routing, strict-mode `ErrNoRoute`), which also asserts a
+  `Router` is itself a contract-conformant `Store`.
+
 ## v0.2.1 — 2026-05-10
 
 ### Changed

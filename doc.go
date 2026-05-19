@@ -18,4 +18,12 @@
 // DeliveredAt and ConsumedAt tracking; see the README for the full
 // lifecycle and the messagingtest sub-package for the shared contract
 // test suite that every Store implementation should pass.
+//
+// The Router type is a Store decorator that routes operations by the
+// Authority segment of each URN: a registered foreign authority is
+// dispatched to that route's Store, every other authority falls through
+// to a local Store. This gives any application federated messaging for
+// free — a standalone install simply registers no foreign routes and
+// runs fully locally. See the Router documentation and
+// messagingtest.RunRouterContract.
 package messaging
