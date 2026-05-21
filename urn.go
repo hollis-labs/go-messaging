@@ -17,6 +17,7 @@ var validKinds = map[AddressKind]struct{}{
 	KindService:  {},
 	KindSession:  {},
 	KindWorkflow: {},
+	KindGroup:    {},
 }
 
 // URN returns the canonical string form of the Address:
