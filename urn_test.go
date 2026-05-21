@@ -40,6 +40,11 @@ func TestAddress_URN_RoundTrip(t *testing.T) {
 			addr: Address{Kind: KindWorkflow, Authority: "router", ID: "wf-20260420-01"},
 			urn:  "msg://workflow/router/wf-20260420-01",
 		},
+		{
+			name: "group",
+			addr: Address{Kind: KindGroup, Authority: "agent-mux", ID: "agridd-substrate"},
+			urn:  "msg://group/agent-mux/agridd-substrate",
+		},
 	}
 
 	for _, tc := range cases {

@@ -14,6 +14,7 @@ const (
 	KindService  AddressKind = "service"
 	KindSession  AddressKind = "session"
 	KindWorkflow AddressKind = "workflow"
+	KindGroup    AddressKind = "group"
 )
 
 // Address is the typed in-memory form of a messaging URN.
