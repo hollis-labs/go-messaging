@@ -113,7 +113,8 @@ func (svc *Service) snapshotHooks() serviceHooks {
 
 // SendMessage validates both ends of the address tuple, persists the
 // message via the Store, and fans the row out to any live subscribers
-// on the recipient's (session, agent) key.
+// on the recipient's (session, agent) key. The returned *Message is owned by
+// the caller and does not alias subscriber or asynchronous-hook deliveries.
 //
 // Auto-registration: if the caller's FromAgentID does not resolve and the
 // Service has a registrar wired in, the opaque RegisterAs hint is delegated
@@ -157,8 +158,7 @@ func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message,
 	if hooks.sink != nil {
 		// Best-effort notification; don't fail the send if the sink
 		// cannot deliver.
-		msgCopy := *out
-		hooks.sink.NotifyReceived(ctx, &msgCopy)
+		hooks.sink.NotifyReceived(ctx, cloneMessage(out))
 	}
 	writeSendEvents(ctx, hooks.events, out)
 
@@ -168,26 +168,21 @@ func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message,
 	// background/runner-owned context so it does not inherit a canceled send
 	// request.
 	//
-	// msgCopy takes a shallow copy of *out before handing it to the
-	// goroutine: out is also returned to SendMessage's own caller, so
-	// without the copy the goroutine and the caller would share the same
-	// *Message pointer — a data race if the caller mutates/reuses it
-	// after SendMessage returns. A shallow copy is sufficient: the two
-	// *string fields (ReadAt/ResolvedAt) are set by separate post-send
-	// code paths (Ack/Resolve), not something the original caller races
-	// on here.
+	// The reactor receives a deep copy because out belongs to the caller and
+	// Message includes pointer fields. Sharing either level would allow caller
+	// mutation to race the asynchronous hook.
 	//
 	// Spawn goes through the host runner when wired and falls back to an
 	// untracked, panic-safe goroutine otherwise.
 	if hooks.wake != nil {
-		msgCopy := *out
+		msgCopy := cloneMessage(out)
 		if hooks.runner != nil {
 			hooks.runner.Go("wake-reactor", func(ctx context.Context) {
-				hooks.wake.ReactToMessage(ctx, &msgCopy)
+				hooks.wake.ReactToMessage(ctx, msgCopy)
 			})
 		} else {
 			goSafe(context.Background(), "mailbox.wake-reactor", func(ctx context.Context) {
-				hooks.wake.ReactToMessage(ctx, &msgCopy)
+				hooks.wake.ReactToMessage(ctx, msgCopy)
 			})
 		}
 	}
@@ -332,10 +327,10 @@ func (svc *Service) maybeAutoRegister(ctx context.Context, fromAgentID, register
 	return true, nil
 }
 
-// Close drains all pubsub subscriber channels and clears the
-// subscriber map. After Close, publish becomes a no-op (no
-// subscribers); existing subscribers see their receive channels
-// close, unblocking any pending receive. Safe to call multiple times.
+// Close drains all pubsub subscriber channels, clears the subscriber map, and
+// waits for subscription janitors to exit. After Close, publish becomes a
+// no-op; existing subscribers see their receive channels close, unblocking any
+// pending receive. Safe to call multiple times and concurrently.
 //
 // Hosts should call Close during graceful shutdown to unblock subscribers.
 func (svc *Service) Close() error {

@@ -19,6 +19,9 @@ out explicitly below.
   SQLite adapter. Host-owned event persistence, handoff transactions, agent
   registration, and asynchronous lifecycle behavior enter through narrow
   interfaces; the root `Store` contract is unchanged.
+- Live fan-out gives the sender, each subscriber, and each hook independently
+  owned message values (including reference fields), and `Service.Close` joins
+  subscription cleanup even when callers use non-cancelable contexts.
 
 ## v0.3.0 — 2026-05-21
 

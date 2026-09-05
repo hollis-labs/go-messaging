@@ -13,8 +13,10 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: 'stable'
-          check-latest: true
+          # Security/tooling runs on an exact patched toolchain. The module's
+          # supported language floor remains go 1.22 and is verified below.
+          go-version: '1.26.1'
+          check-latest: false
 
       - name: go fmt (verify)
         run: |
@@ -30,7 +32,7 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.1.6
+          version: v2.11.4
 
       - name: go test -race
         run: go test -race -count=1 ./...
@@ -39,3 +41,21 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
+
+  go-1-22-compat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.12'
+          check-latest: false
+
+      - name: Go 1.22 clean-archive compatibility
+        run: |
+          archive_dir=$(mktemp -d)
+          git archive HEAD | tar -x -C "$archive_dir"
+          cd "$archive_dir"
+          go vet ./...
+          go test -race -count=1 ./...

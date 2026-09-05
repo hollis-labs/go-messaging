@@ -7,8 +7,10 @@
 package mailbox
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -56,6 +58,129 @@ func TestSubscribe_ReceivesNewMessage(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timeout waiting for pushed message")
 	}
+}
+
+// TestSubscribe_DeliveriesHaveIndependentOwnership proves the value returned
+// to the sender and each live delivery occupy independent mutable storage.
+// The concurrent writes are intentionally redundant with the pointer checks:
+// under -race they also expose an alias if fan-out ever regresses.
+func TestSubscribe_DeliveriesHaveIndependentOwnership(t *testing.T) {
+	svc, _ := newTestService(t, "file-a")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	firstCh, err := svc.SubscribeSessionAgent(ctx, "sess-1", "file-a")
+	if err != nil {
+		t.Fatalf("subscribe first: %v", err)
+	}
+	secondCh, err := svc.SubscribeSessionAgent(ctx, "sess-1", "file-a")
+	if err != nil {
+		t.Fatalf("subscribe second: %v", err)
+	}
+
+	sent, err := svc.SendMessage(context.Background(), baseInput(testHumanID, "file-a"))
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	first := receiveMessage(t, firstCh)
+	second := receiveMessage(t, secondCh)
+
+	if sent == first || sent == second || first == second {
+		t.Errorf("messages alias: sender=%p first=%p second=%p", sent, first, second)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for _, item := range []struct {
+		msg   *Message
+		value string
+	}{
+		{sent, "sender"},
+		{first, "first"},
+		{second, "second"},
+	} {
+		item := item
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for i := 0; i < 5000; i++ {
+				item.msg.Body = item.value
+				item.msg.Metadata = item.value
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+}
+
+func receiveMessage(t *testing.T, ch <-chan *Message) *Message {
+	t.Helper()
+	select {
+	case msg, ok := <-ch:
+		if !ok {
+			t.Fatal("subscriber channel closed before delivery")
+		}
+		if msg == nil {
+			t.Fatal("received nil message")
+		}
+		return msg
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for pushed message")
+		return nil
+	}
+}
+
+func TestPubsub_PublishDeepCopiesReferenceFieldsPerSubscriber(t *testing.T) {
+	p := newPubsub()
+	firstCh, err := p.subscribe(context.Background(), "sess-1", "file-a")
+	if err != nil {
+		t.Fatalf("subscribe first: %v", err)
+	}
+	secondCh, err := p.subscribe(context.Background(), "sess-1", "file-a")
+	if err != nil {
+		t.Fatalf("subscribe second: %v", err)
+	}
+
+	const wantReadAt = "2026-09-04T12:00:00Z"
+	const wantResolvedAt = "2026-09-04T12:01:00Z"
+	readAt := wantReadAt
+	resolvedAt := wantResolvedAt
+	source := &Message{
+		ToSessionID: "sess-1",
+		ToAgentID:   "file-a",
+		Body:        "original",
+		ReadAt:      &readAt,
+		ResolvedAt:  &resolvedAt,
+	}
+	p.publish(source)
+	first := receiveMessage(t, firstCh)
+	second := receiveMessage(t, secondCh)
+
+	if source == first || source == second || first == second {
+		t.Errorf("message pointers alias: source=%p first=%p second=%p", source, first, second)
+	}
+	if source.ReadAt == first.ReadAt || source.ReadAt == second.ReadAt || first.ReadAt == second.ReadAt {
+		t.Errorf("ReadAt pointers alias: source=%p first=%p second=%p", source.ReadAt, first.ReadAt, second.ReadAt)
+	}
+	if source.ResolvedAt == first.ResolvedAt || source.ResolvedAt == second.ResolvedAt || first.ResolvedAt == second.ResolvedAt {
+		t.Errorf("ResolvedAt pointers alias: source=%p first=%p second=%p", source.ResolvedAt, first.ResolvedAt, second.ResolvedAt)
+	}
+
+	first.Body = "first-mutated"
+	*first.ReadAt = "first-read-mutated"
+	*first.ResolvedAt = "first-resolved-mutated"
+	if source.Body != "original" || second.Body != "original" {
+		t.Errorf("body mutation escaped first delivery: source=%q second=%q", source.Body, second.Body)
+	}
+	if *source.ReadAt != wantReadAt || *second.ReadAt != wantReadAt {
+		t.Errorf("ReadAt mutation escaped first delivery: source=%q second=%q", *source.ReadAt, *second.ReadAt)
+	}
+	if *source.ResolvedAt != wantResolvedAt || *second.ResolvedAt != wantResolvedAt {
+		t.Errorf("ResolvedAt mutation escaped first delivery: source=%q second=%q", *source.ResolvedAt, *second.ResolvedAt)
+	}
+
+	p.closeAll()
 }
 
 // TestSubscribe_IgnoresNonMatching verifies that a subscription for
@@ -190,6 +315,56 @@ func TestService_Close_DrainsSubscribers(t *testing.T) {
 	}
 }
 
+func subscriptionJanitorCount() int {
+	stack := make([]byte, 8<<20)
+	n := runtime.Stack(stack, true)
+	return bytes.Count(stack[:n], []byte("mailbox.(*pubsub).subscribe.func1"))
+}
+
+// TestService_Close_TerminatesBackgroundSubscriptionJanitors is a leak
+// regression for non-cancelable subscriptions. A large cohort makes the stack
+// census deterministic while Close's internal join makes the postcondition
+// exact for all janitors owned by this service.
+func TestService_Close_TerminatesBackgroundSubscriptionJanitors(t *testing.T) {
+	const subscriptionCount = 256
+
+	svc, _ := newTestService(t, "file-a")
+	baseline := subscriptionJanitorCount()
+	channels := make([]<-chan *Message, 0, subscriptionCount)
+	for i := 0; i < subscriptionCount; i++ {
+		ch, err := svc.SubscribeSessionAgent(context.Background(), "sess-1", "file-a")
+		if err != nil {
+			t.Fatalf("subscribe %d: %v", i, err)
+		}
+		channels = append(channels, ch)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for subscriptionJanitorCount() < baseline+subscriptionCount && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	if got := subscriptionJanitorCount(); got < baseline+subscriptionCount {
+		t.Fatalf("started janitors = %d above baseline, want %d", got-baseline, subscriptionCount)
+	}
+
+	if err := svc.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if got := subscriptionJanitorCount(); got > baseline {
+		t.Fatalf("subscription janitors after Close = %d above baseline, want 0", got-baseline)
+	}
+	for i, ch := range channels {
+		select {
+		case _, ok := <-ch:
+			if ok {
+				t.Fatalf("subscription %d remained open", i)
+			}
+		default:
+			t.Fatalf("subscription %d did not close", i)
+		}
+	}
+}
+
 // TestSubscribe_CtxCancelReleasesSlot covers the F06/F07 interaction:
 // canceling the subscription ctx must remove the subscriber from the
 // map and close its channel, so a handler that loses its transport stream
@@ -313,5 +488,38 @@ func TestPubsub_CloseLinearizesSubscriptionAdmission(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatalf("iteration %d: admitted channel was not closed", i)
 		}
+	}
+}
+
+func TestPubsub_ConcurrentPublishAndCloseIsIdempotent(t *testing.T) {
+	p := newPubsub()
+	for i := 0; i < 64; i++ {
+		if _, err := p.subscribe(context.Background(), "sess-1", "file-a"); err != nil {
+			t.Fatalf("subscribe %d: %v", i, err)
+		}
+	}
+	msg := &Message{ToSessionID: "sess-1", ToAgentID: "file-a", Body: "race"}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				p.publish(msg)
+			}
+		}()
+	}
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.closeAll()
+		}()
+	}
+	wg.Wait()
+
+	if _, err := p.subscribe(context.Background(), "sess-1", "file-a"); !errors.Is(err, ErrClosed) {
+		t.Fatalf("post-close subscribe error = %v, want ErrClosed", err)
 	}
 }

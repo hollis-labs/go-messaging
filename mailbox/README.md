@@ -57,11 +57,15 @@ synthetic identities, and registration policy therefore remain in the host.
 `Service` and `SQLiteStore` are safe for concurrent use when their
 collaborators are. Live subscriptions use a bounded buffer of 16 messages.
 Publishing is non-blocking; a slow subscriber drops only its own delivery.
+Each subscriber receives an independently owned deep copy of a message; its
+copy does not alias another subscriber or the value returned to the sender.
 Canceling the subscription context removes and closes that channel. Call
-`Service.Close` during shutdown to close every remaining subscription. A
-subscription admitted before `Close` is closed by it; one attempted after
-`Close` returns `ErrClosed`.
+`Service.Close` during shutdown to close every remaining subscription and wait
+for its janitor goroutines to exit, including subscriptions made with
+`context.Background()`. A subscription admitted before `Close` is closed by
+it; one attempted after `Close` returns `ErrClosed`.
 
-Wake reactions receive a copy of the persisted message and run asynchronously.
-Configure `AsyncRunner` when those goroutines must be tracked and drained;
-otherwise a panic-contained untracked goroutine is used.
+Notification sinks and wake reactions also receive deep copies of the persisted
+message. Wake reactions run asynchronously. Configure `AsyncRunner` when those
+goroutines must be tracked and drained; otherwise a panic-contained untracked
+goroutine is used.

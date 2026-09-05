@@ -58,6 +58,26 @@ type Message struct {
 	ResolvedAt    *string `json:"resolved_at"`
 }
 
+// cloneMessage returns an independently owned copy of msg. Keep this helper
+// explicit as Message evolves: every reference field must be copied so callers,
+// subscribers, and asynchronous hooks can mutate their copies without racing.
+func cloneMessage(msg *Message) *Message {
+	if msg == nil {
+		return nil
+	}
+
+	cloned := *msg
+	if msg.ReadAt != nil {
+		readAt := *msg.ReadAt
+		cloned.ReadAt = &readAt
+	}
+	if msg.ResolvedAt != nil {
+		resolvedAt := *msg.ResolvedAt
+		cloned.ResolvedAt = &resolvedAt
+	}
+	return &cloned
+}
+
 // SendInput is the caller-supplied portion of a new message. Defaults
 // for missing fields are filled in by Store.Send — see the Store
 // interface doc for the full default list.

@@ -11,11 +11,14 @@ import (
 type hookTestStore struct{ next atomic.Uint64 }
 
 func (s *hookTestStore) Send(_ context.Context, input SendInput) (*Message, error) {
+	readAt := "2026-09-04T12:00:00Z"
+	resolvedAt := "2026-09-04T12:01:00Z"
 	return &Message{
 		ID:            fmt.Sprintf("message-%d", s.next.Add(1)),
 		FromSessionID: input.FromSessionID, FromAgentID: input.FromAgentID,
 		ToSessionID: input.ToSessionID, ToAgentID: input.ToAgentID,
 		Body: input.Body, Channel: ChannelChat, Kind: KindNotification,
+		ReadAt: &readAt, ResolvedAt: &resolvedAt,
 	}, nil
 }
 func (*hookTestStore) Get(context.Context, string) (*Message, error) { panic("unexpected Get") }
@@ -43,6 +46,55 @@ func (*noOpWake) ReactToMessage(context.Context, *Message) {}
 type inlineRunner struct{}
 
 func (*inlineRunner) Go(_ string, fn func(context.Context)) { fn(context.Background()) }
+
+type ownershipCapture struct {
+	notification *Message
+	wake         *Message
+}
+
+func (c *ownershipCapture) NotifyReceived(_ context.Context, msg *Message) {
+	c.notification = msg
+}
+
+func (c *ownershipCapture) ReactToMessage(_ context.Context, msg *Message) {
+	c.wake = msg
+}
+
+func TestService_HooksReceiveIndependentlyOwnedDeepCopies(t *testing.T) {
+	svc := NewService(&hookTestStore{}, newFakeResolver(testHumanID, "file-a"), nil)
+	capture := &ownershipCapture{}
+	svc.SetNotificationSink(capture)
+	svc.SetWakeReactor(capture)
+	svc.SetAsyncRunner(&inlineRunner{})
+
+	sent, err := svc.SendMessage(context.Background(), baseInput(testHumanID, "file-a"))
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	notification := capture.notification
+	wake := capture.wake
+	if notification == nil || wake == nil {
+		t.Fatalf("hook deliveries: notification=%p wake=%p", notification, wake)
+	}
+	if sent == notification || sent == wake || notification == wake {
+		t.Errorf("hook messages alias: sender=%p notification=%p wake=%p", sent, notification, wake)
+	}
+	if sent.ReadAt == notification.ReadAt || sent.ReadAt == wake.ReadAt || notification.ReadAt == wake.ReadAt {
+		t.Errorf("hook ReadAt pointers alias: sender=%p notification=%p wake=%p", sent.ReadAt, notification.ReadAt, wake.ReadAt)
+	}
+	if sent.ResolvedAt == notification.ResolvedAt || sent.ResolvedAt == wake.ResolvedAt || notification.ResolvedAt == wake.ResolvedAt {
+		t.Errorf("hook ResolvedAt pointers alias: sender=%p notification=%p wake=%p", sent.ResolvedAt, notification.ResolvedAt, wake.ResolvedAt)
+	}
+
+	*notification.ReadAt = "notification-mutated"
+	*wake.ResolvedAt = "wake-mutated"
+	if *sent.ReadAt != "2026-09-04T12:00:00Z" || *wake.ReadAt != "2026-09-04T12:00:00Z" {
+		t.Errorf("notification mutation escaped its copy: sender=%q wake=%q", *sent.ReadAt, *wake.ReadAt)
+	}
+	if *sent.ResolvedAt != "2026-09-04T12:01:00Z" || *notification.ResolvedAt != "2026-09-04T12:01:00Z" {
+		t.Errorf("wake mutation escaped its copy: sender=%q notification=%q", *sent.ResolvedAt, *notification.ResolvedAt)
+	}
+}
 
 // TestService_HookReconfigurationConcurrentWithReaders is a race-detector
 // regression for every setter/read path in Service. Hooks remain valid for the
