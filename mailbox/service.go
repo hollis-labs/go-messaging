@@ -1,8 +1,5 @@
 package mailbox
 
-// Service is the authorization + fan-out wrapper around Store. Transport
-// callers go through Service rather than touching Store directly so that
-// validation, auth checks, and subscriber fan-out all live in one place.
 import (
 	"context"
 	"fmt"
@@ -10,15 +7,6 @@ import (
 	"sync"
 )
 
-// Service coordinates messaging validation, persistence, subscriber fan-out,
-// and optional host callbacks. Its required collaborators are:
-//
-//   - store: the mailbox Store for message CRUD.
-//   - resolver: looks up agents by ID so SendMessage and Subscribe
-//     can reject unknown addresses.
-//
-// Service is safe for concurrent use, including hook reconfiguration and
-// subscription shutdown.
 // NotificationSink receives a message-received hook on every
 // successful SendMessage. Nil-safe — Service skips the sink call when
 // this is unset.
@@ -36,6 +24,16 @@ type WakeReactor interface {
 	ReactToMessage(ctx context.Context, msg *Message)
 }
 
+// Service is the authorization and fan-out wrapper around Store. Transport
+// callers go through Service so validation, authorization checks, persistence,
+// and subscriber fan-out share one boundary. Its required collaborators are:
+//
+//   - store: the mailbox Store for message CRUD.
+//   - resolver: looks up agents by ID so SendMessage and Subscribe can reject
+//     unknown addresses.
+//
+// Service is safe for concurrent use, including hook reconfiguration and
+// subscription shutdown, when its collaborators are safe for concurrent use.
 type Service struct {
 	store     Store
 	resolver  AgentResolver

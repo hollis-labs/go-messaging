@@ -24,9 +24,11 @@ application and does not name or query host-owned session tables.
 
 The only table expected by the included adapter is:
 
-- `agent_messages` with the fields represented by `Message`. The
-  `channel`, `kind`, `type`, and `status` constraints must admit the
-  exported constants.
+- `agent_messages` with the fields represented by `Message`. It must be a
+  normal SQLite rowid table (not `WITHOUT ROWID`): the adapter uses rowid as
+  the stable insertion-order tiebreaker when timestamps compare equal. The
+  `channel`, `kind`, `type`, and `status` constraints must admit the exported
+  constants.
 Event storage and handoff state are optional host adapters. `EventStore`
 receives mailbox mutation events and must return the most recent requested
 page in chronological order. `HandoffCoordinator` owns persistence,

@@ -13,6 +13,8 @@ import (
 
 // SQLiteStore is the SQLite-backed implementation of Store. It targets
 // the host-provisioned `agent_messages` table documented in README.md.
+// That table must be a normal SQLite rowid table: rowid is the stable
+// insertion-order tiebreaker for messages with equal timestamps.
 type SQLiteStore struct {
 	db *sql.DB
 }
@@ -130,8 +132,12 @@ func (s *SQLiteStore) Inbox(ctx context.Context, sessionID, agentID string, filt
 		args = append(args, filter.Kind)
 	}
 
+	// Send timestamps have second precision for compatibility with existing
+	// host rows, so bursts routinely share created_at. rowid is the explicit
+	// insertion-order tiebreaker; without it a valid host index may reorder
+	// equal-timestamp messages and violate Store.Inbox's FIFO contract.
 	query := `SELECT ` + selectColumns + ` FROM agent_messages WHERE ` +
-		strings.Join(where, " AND ") + ` ORDER BY priority DESC, created_at ASC`
+		strings.Join(where, " AND ") + ` ORDER BY priority DESC, created_at ASC, rowid ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {

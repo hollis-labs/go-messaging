@@ -66,7 +66,7 @@ type SendInput struct {
 	FromAgentID   string
 	ToSessionID   string
 	ToAgentID     string
-	// Channel is required; empty defaults to ChannelChat. The Store
+	// Channel is optional; empty defaults to ChannelChat. The Store
 	// validates against the CHECK constraint so unknown values reject
 	// at insert time rather than silently rewriting themselves.
 	Channel string

@@ -30,6 +30,8 @@ type Store interface {
 
 	// Inbox returns messages addressed to (sessionID, agentID), optionally
 	// filtered. Results are priority-descending and FIFO within a priority.
+	// Implementations must use a stable insertion-order tiebreaker when their
+	// persisted timestamps can compare equal.
 	Inbox(ctx context.Context, sessionID, agentID string, filter InboxFilter) ([]Message, error)
 
 	// Thread returns all messages in a thread chronologically.

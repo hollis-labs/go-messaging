@@ -85,6 +85,48 @@ func TestSQLiteStore_Inbox_FiltersBySessionAndAgent(t *testing.T) {
 	}
 }
 
+// TestSQLiteStore_Inbox_EqualTimestampFIFOWithAdversarialIndex pins the
+// stable insertion-order tiebreaker. The host-owned index is valid for the
+// documented schema but deliberately orders equal timestamp rows by id DESC;
+// without the explicit rowid term in Inbox, SQLite uses that index order and
+// returns the second inserted message first.
+func TestSQLiteStore_Inbox_EqualTimestampFIFOWithAdversarialIndex(t *testing.T) {
+	s := newTestMessagingStore(t)
+	ctx := context.Background()
+
+	if _, err := s.DB().ExecContext(ctx, `CREATE INDEX adversarial_inbox_order
+		ON agent_messages(to_session_id, to_agent_id, priority DESC, created_at ASC, id DESC)`); err != nil {
+		t.Fatalf("create adversarial index: %v", err)
+	}
+	insert := `INSERT INTO agent_messages
+		(id, from_session_id, from_agent_id, to_session_id, to_agent_id,
+		 thread_id, type, body, metadata, priority, status, channel, kind, payload_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	for _, row := range []struct {
+		id   string
+		body string
+	}{
+		{id: "a-first", body: "first"},
+		{id: "z-second", body: "second"},
+	} {
+		if _, err := s.DB().ExecContext(ctx, insert,
+			row.id, "source-session", "sender", "target-session", "recipient",
+			row.id, TypeMessage, row.body, `{}`, 2, StatusUnread,
+			ChannelChat, KindNotification, `{}`, "2026-09-05T00:00:00Z",
+		); err != nil {
+			t.Fatalf("insert %s: %v", row.id, err)
+		}
+	}
+
+	got, err := s.Inbox(ctx, "target-session", "recipient", InboxFilter{})
+	if err != nil {
+		t.Fatalf("Inbox: %v", err)
+	}
+	if len(got) != 2 || got[0].Body != "first" || got[1].Body != "second" {
+		t.Fatalf("equal-timestamp Inbox is not FIFO: %+v", got)
+	}
+}
+
 // TestSQLiteStore_Inbox_FiltersByStatus verifies that the status filter
 // narrows results to unread or read messages.
 func TestSQLiteStore_Inbox_FiltersByStatus(t *testing.T) {
