@@ -8,9 +8,8 @@
 // history, session events, handoffs, and live in-process fan-out. Conflating
 // those lifecycle models would make the root Store contract ambiguous.
 //
-// SQLiteStore and the optional DB-backed Service features operate on tables
-// provisioned by the host application. See README.md in this directory for
-// the required schema contract. Agent identity, auto-registration policy,
+// SQLiteStore operates on a mailbox-message table provisioned by the host.
+// Agent identity, registration, event persistence, handoff coordination,
 // notification delivery, wake behavior, and goroutine lifecycle remain
 // host-owned behind narrow interfaces.
 package mailbox

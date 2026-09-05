@@ -12,11 +12,11 @@ out explicitly below.
 ### Added
 - Optional `mailbox` subpackage for durable tuple-addressed inboxes with
   unread/read/resolved lifecycle, priority and thread queries, bounded recent
-  history, in-process live subscriptions, caller identity, session events,
-  transactional primary-agent handoffs, notification/wake hooks, and a
-  host-migrated SQLite adapter. Host-owned agent registration and asynchronous
-  lifecycle behavior enter through narrow interfaces; the root `Store`
-  contract is unchanged.
+  history, in-process live subscriptions, caller identity, mailbox mutation
+  events, handoff coordination, notification/wake hooks, and a host-migrated
+  SQLite adapter. Host-owned event persistence, handoff transactions, agent
+  registration, and asynchronous lifecycle behavior enter through narrow
+  interfaces; the root `Store` contract is unchanged.
 
 ## v0.3.0 — 2026-05-21
 

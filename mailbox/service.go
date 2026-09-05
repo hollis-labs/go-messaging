@@ -1,42 +1,34 @@
 package mailbox
 
-// Service is the authorization + fan-out wrapper around Store. CLI,
-// HTTP, and MCP callers go through Service rather than touching Store
-// directly so that validation, auth checks, and subscriber fan-out
-// all live in one place.
+// Service is the authorization + fan-out wrapper around Store. Transport
+// callers go through Service rather than touching Store directly so that
+// validation, auth checks, and subscriber fan-out all live in one place.
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
+	"sync"
 )
 
-// Service coordinates messaging validation, persistence, subscriber
-// fan-out, and handoff-state mutations. It holds three collaborators:
+// Service coordinates messaging validation, persistence, subscriber fan-out,
+// and optional host callbacks. Its required collaborators are:
 //
 //   - store: the mailbox Store for message CRUD.
-//   - db:    the underlying *sql.DB for cross-table handoff txns that
-//     reach into session_handoffs / session_agents — those
-//     tables live outside the messaging Store interface.
 //   - resolver: looks up agents by ID so SendMessage and Subscribe
 //     can reject unknown addresses.
 //
-// Service is safe for concurrent use since Store, the *sql.DB, and
-// the pubsub are each safe for concurrent use.
+// Service is safe for concurrent use, including hook reconfiguration and
+// subscription shutdown.
 // NotificationSink receives a message-received hook on every
-// successful SendMessage. Implementations bridge messaging events
-// into the session SSE stream so subscribed UI clients see an
-// incoming message chip / notification. Nil-safe — Service skips the
-// sink call when this is unset (e.g. in tests).
+// successful SendMessage. Nil-safe — Service skips the sink call when
+// this is unset.
 type NotificationSink interface {
 	NotifyReceived(ctx context.Context, msg *Message)
 }
 
-// WakeReactor receives a live-wake hook on every successful SendMessage
-// whose Kind is eligible (see the SendMessage call site for the
-// KindSubagentResult exclusion). Implementations resolve the recipient
-// session's wake policy and may start a new turn rather than relying on
-// inbox polling.
+// WakeReactor receives a live-wake hook on every successful SendMessage. The
+// shared package invokes the configured reactor for every successful send;
+// implementations decide which message kinds should start work.
 //
 // Hosts implement this interface at their runtime boundary. Wired via
 // SetWakeReactor; nil is permitted.
@@ -46,25 +38,28 @@ type WakeReactor interface {
 
 type Service struct {
 	store     Store
-	db        *sql.DB
 	resolver  AgentResolver
-	registrar AgentRegistrar   // nil = auto-register disabled
-	sink      NotificationSink // nil = no SSE push
-	wake      WakeReactor      // nil = no live-wake side effect
-	runner    AsyncRunner
+	registrar AgentRegistrar // nil = auto-register disabled
 	pub       *pubsub
+
+	hooksMu sync.RWMutex
+	hooks   serviceHooks
 }
 
-// NewService constructs a Service. The Store is used for message CRUD
-// and should wrap the same underlying DB as the *sql.DB so that
-// handoff transactions and message reads see consistent state. The
-// resolver is used by ValidateAgentID when send/subscribe arrives
-// with an unknown agent ID. The registrar optionally enables
-// auto-register-on-first-send; pass nil to disable.
-func NewService(s Store, db *sql.DB, r AgentResolver, reg AgentRegistrar) *Service {
+type serviceHooks struct {
+	sink     NotificationSink
+	wake     WakeReactor
+	runner   AsyncRunner
+	events   EventStore
+	handoffs HandoffCoordinator
+}
+
+// NewService constructs a Service. The resolver validates every addressable
+// agent ID. The registrar optionally enables host-owned registration on first
+// send; pass nil to disable.
+func NewService(s Store, r AgentResolver, reg AgentRegistrar) *Service {
 	return &Service{
 		store:     s,
-		db:        db,
 		resolver:  r,
 		registrar: reg,
 		pub:       newPubsub(),
@@ -76,31 +71,56 @@ func NewService(s Store, db *sql.DB, r AgentResolver, reg AgentRegistrar) *Servi
 // after StreamManager construction without threading it through
 // every caller that doesn't care.
 func (svc *Service) SetNotificationSink(s NotificationSink) {
-	svc.sink = s
+	svc.hooksMu.Lock()
+	svc.hooks.sink = s
+	svc.hooksMu.Unlock()
 }
 
 // SetWakeReactor wires (or unwires) the live-wake hook. It is separate from
 // NewService so hosts can resolve construction-order dependencies.
 func (svc *Service) SetWakeReactor(r WakeReactor) {
-	svc.wake = r
+	svc.hooksMu.Lock()
+	svc.hooks.wake = r
+	svc.hooksMu.Unlock()
 }
 
 // SetAsyncRunner wires (or unwires) the host-owned asynchronous runner used
 // for wake reactions.
 func (svc *Service) SetAsyncRunner(r AsyncRunner) {
-	svc.runner = r
+	svc.hooksMu.Lock()
+	svc.hooks.runner = r
+	svc.hooksMu.Unlock()
+}
+
+// SetEventStore wires (or unwires) host persistence for mailbox events.
+func (svc *Service) SetEventStore(events EventStore) {
+	svc.hooksMu.Lock()
+	svc.hooks.events = events
+	svc.hooksMu.Unlock()
+}
+
+// SetHandoffCoordinator wires (or unwires) the host-owned handoff workflow.
+func (svc *Service) SetHandoffCoordinator(coordinator HandoffCoordinator) {
+	svc.hooksMu.Lock()
+	svc.hooks.handoffs = coordinator
+	svc.hooksMu.Unlock()
+}
+
+func (svc *Service) snapshotHooks() serviceHooks {
+	svc.hooksMu.RLock()
+	hooks := svc.hooks
+	svc.hooksMu.RUnlock()
+	return hooks
 }
 
 // SendMessage validates both ends of the address tuple, persists the
 // message via the Store, and fans the row out to any live subscribers
 // on the recipient's (session, agent) key.
 //
-// Auto-registration: if the caller's FromAgentID is not the user
-// sentinel and doesn't resolve AND the Service has a registrar wired
-// in, a minimal agent_profiles row is inserted with kind='external'
-// (default) or 'cli' (when input.RegisterAs == "cli"). The send then
-// proceeds with the freshly-registered ID. Without a registrar the
-// unknown id still rejects through ValidateAgentID below.
+// Auto-registration: if the caller's FromAgentID does not resolve and the
+// Service has a registrar wired in, the opaque RegisterAs hint is delegated
+// to the host. Without a registrar, unknown IDs reject through
+// ValidateAgentID.
 func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message, error) {
 	registered, err := svc.maybeAutoRegister(ctx, input.FromAgentID, input.RegisterAs)
 	if err != nil {
@@ -135,29 +155,20 @@ func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message,
 	if svc.pub != nil {
 		svc.pub.publish(out)
 	}
-	if svc.sink != nil {
+	hooks := svc.snapshotHooks()
+	if hooks.sink != nil {
 		// Best-effort notification; don't fail the send if the sink
-		// can't deliver (e.g. no active SSE for that session yet).
-		svc.sink.NotifyReceived(ctx, out)
+		// cannot deliver.
+		msgCopy := *out
+		hooks.sink.NotifyReceived(ctx, &msgCopy)
 	}
-	// Record send in the session event log for replay.
-	svc.writeSendEvents(ctx, out)
+	writeSendEvents(ctx, hooks.events, out)
 
-	// React to the send by optionally triggering a live
-	// turn on the recipient session instead of leaving delivery to a
-	// poll. Skipped for Kind=KindSubagentResult — that specific kind
-	// already has its own dedicated wake path (subagent.CompletionReactor,
-	// invoked directly by a host completion path after its own SendMessage
-	// call, with its own busy-check and a completion-specific
-	// summarizing prompt fed by the kind=subagent_result turn-start
-	// injection). Reacting here too would double-trigger the same
-	// completion event through two different synthetic prompts racing
-	// registerGenerationIfIdle. Fire-and-forget in its own goroutine
-	// completion-reactor goroutine) with a background context so a slow or
-	// misbehaving
-	// reactor never blocks the SendMessage caller (self-tool call, HTTP
-	// handler, or background-job poster) and outlives a canceled request
-	// ctx.
+	// A wake reactor is a host-owned policy seam. Invoke it for every message;
+	// filtering message kinds in this package would bake one host's runtime
+	// topology into a shared mailbox primitive. Fire-and-forget with a
+	// background/runner-owned context so it does not inherit a canceled send
+	// request.
 	//
 	// msgCopy takes a shallow copy of *out before handing it to the
 	// goroutine: out is also returned to SendMessage's own caller, so
@@ -170,15 +181,15 @@ func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message,
 	//
 	// Spawn goes through the host runner when wired and falls back to an
 	// untracked, panic-safe goroutine otherwise.
-	if svc.wake != nil && out.Kind != KindSubagentResult {
+	if hooks.wake != nil {
 		msgCopy := *out
-		if svc.runner != nil {
-			svc.runner.Go("wake-reactor", func(ctx context.Context) {
-				svc.wake.ReactToMessage(ctx, &msgCopy)
+		if hooks.runner != nil {
+			hooks.runner.Go("wake-reactor", func(ctx context.Context) {
+				hooks.wake.ReactToMessage(ctx, &msgCopy)
 			})
 		} else {
 			goSafe(context.Background(), "mailbox.wake-reactor", func(ctx context.Context) {
-				svc.wake.ReactToMessage(ctx, &msgCopy)
+				hooks.wake.ReactToMessage(ctx, &msgCopy)
 			})
 		}
 	}
@@ -237,7 +248,7 @@ func (svc *Service) Ack(ctx context.Context, sessionID, agentID, msgID string) e
 	if err := svc.store.Ack(ctx, msgID); err != nil {
 		return err
 	}
-	svc.writeMessageEvent(ctx, sessionID, EventMessageAcked, msg)
+	writeMessageEvent(ctx, svc.snapshotHooks().events, sessionID, EventMessageAcked, msg)
 	return nil
 }
 
@@ -257,7 +268,7 @@ func (svc *Service) Resolve(ctx context.Context, sessionID, agentID, msgID strin
 	if err := svc.store.Resolve(ctx, msgID); err != nil {
 		return err
 	}
-	svc.writeMessageEvent(ctx, sessionID, EventMessageResolved, msg)
+	writeMessageEvent(ctx, svc.snapshotHooks().events, sessionID, EventMessageResolved, msg)
 	return nil
 }
 
@@ -285,15 +296,14 @@ func (svc *Service) UnreadCount(ctx context.Context, sessionID, agentID string) 
 	return svc.store.UnreadCount(ctx, sessionID, agentID)
 }
 
-// maybeAutoRegister inserts a minimal agent_profiles row for an
-// unknown fromAgentID when the Service has a registrar wired. Record shape
-// and registration policy remain entirely host-owned.
+// maybeAutoRegister delegates an unknown fromAgentID to the optional host
+// registrar. Record shape and registration policy remain entirely host-owned.
 // Returns (registered=true, nil) when registration succeeded,
 // (registered=false, nil) when the id already resolves or auto-
 // register is disabled, and (_, err) when the insert fails for a
 // reason other than a lost race.
 func (svc *Service) maybeAutoRegister(ctx context.Context, fromAgentID, registerAs string) (bool, error) {
-	if svc.registrar == nil || fromAgentID == "" || fromAgentID == UserSentinel {
+	if svc.registrar == nil || fromAgentID == "" {
 		return false, nil
 	}
 	if svc.resolver != nil {

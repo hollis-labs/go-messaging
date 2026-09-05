@@ -35,13 +35,19 @@ const subscriberBufferSize = 16
 // pubsub is a minimal in-process fan-out hub keyed by
 // sessionID + ":" + agentID. It is safe for concurrent use.
 type pubsub struct {
-	mu   sync.RWMutex
-	subs map[string][]chan *Message
+	mu     sync.RWMutex
+	subs   map[subscriptionKey][]chan *Message
+	closed bool
+}
+
+type subscriptionKey struct {
+	sessionID string
+	agentID   string
 }
 
 // newPubsub constructs an empty pubsub.
 func newPubsub() *pubsub {
-	return &pubsub{subs: make(map[string][]chan *Message)}
+	return &pubsub{subs: make(map[subscriptionKey][]chan *Message)}
 }
 
 // subscribe registers a new subscriber for the given (sessionID,
@@ -50,11 +56,14 @@ func newPubsub() *pubsub {
 // end; a goroutine owned by the pubsub then removes the channel from
 // the subscriber table and closes it so that pending receivers
 // unblock.
-func (p *pubsub) subscribe(ctx context.Context, sessionID, agentID string) <-chan *Message {
-	key := sessionID + ":" + agentID
-	ch := make(chan *Message, subscriberBufferSize)
-
+func (p *pubsub) subscribe(ctx context.Context, sessionID, agentID string) (<-chan *Message, error) {
+	key := subscriptionKey{sessionID: sessionID, agentID: agentID}
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil, ErrClosed
+	}
+	ch := make(chan *Message, subscriberBufferSize)
 	p.subs[key] = append(p.subs[key], ch)
 	p.mu.Unlock()
 
@@ -82,7 +91,7 @@ func (p *pubsub) subscribe(ctx context.Context, sessionID, agentID string) <-cha
 		}
 	})
 
-	return ch
+	return ch, nil
 }
 
 // closeAll drains every subscriber channel and empties the subscriber
@@ -100,7 +109,8 @@ func (p *pubsub) closeAll() {
 			close(ch)
 		}
 	}
-	p.subs = make(map[string][]chan *Message)
+	p.subs = make(map[subscriptionKey][]chan *Message)
+	p.closed = true
 }
 
 // publish fans the message out to every subscriber whose key matches
@@ -120,7 +130,7 @@ func (p *pubsub) publish(msg *Message) {
 	if msg == nil {
 		return
 	}
-	key := msg.ToSessionID + ":" + msg.ToAgentID
+	key := subscriptionKey{sessionID: msg.ToSessionID, agentID: msg.ToAgentID}
 
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -145,5 +155,9 @@ func (svc *Service) SubscribeSessionAgent(ctx context.Context, sessionID, agentI
 	if err := ValidateAgentID(ctx, svc.resolver, agentID); err != nil {
 		return nil, fmt.Errorf("%w: agent_id: %w", ErrValidation, err)
 	}
-	return svc.pub.subscribe(ctx, sessionID, agentID), nil
+	ch, err := svc.pub.subscribe(ctx, sessionID, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("subscribe: %w", err)
+	}
+	return ch, nil
 }

@@ -10,7 +10,7 @@ import (
 // for missing Type / Metadata / Priority / Status / ThreadID / CreatedAt
 // and returns the authoritative persisted row.
 func TestSQLiteStore_Send_Defaults(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 
 	out, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-1",
@@ -49,7 +49,7 @@ func TestSQLiteStore_Send_Defaults(t *testing.T) {
 // scopes by (to_session_id, to_agent_id) and ignores messages addressed
 // to other agents or sessions.
 func TestSQLiteStore_Inbox_FiltersBySessionAndAgent(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 	ctx := context.Background()
 
 	// Two messages for (sess-1, file-a).
@@ -88,7 +88,7 @@ func TestSQLiteStore_Inbox_FiltersBySessionAndAgent(t *testing.T) {
 // TestSQLiteStore_Inbox_FiltersByStatus verifies that the status filter
 // narrows results to unread or read messages.
 func TestSQLiteStore_Inbox_FiltersByStatus(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 	ctx := context.Background()
 
 	m1, err := s.Send(ctx, SendInput{
@@ -132,7 +132,7 @@ func TestSQLiteStore_Inbox_FiltersByStatus(t *testing.T) {
 // chronological order (oldest first) after the DESC-then-reverse
 // transformation.
 func TestSQLiteStore_Recent(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 	ctx := context.Background()
 
 	bodies := []string{"one", "two", "three", "four", "five"}
@@ -167,7 +167,7 @@ func TestSQLiteStore_Recent(t *testing.T) {
 // down to MaxRecentLimit and a non-positive limit falls back to the
 // default. Covers F05 at the store layer.
 func TestSQLiteStore_Recent_LimitCap(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 	ctx := context.Background()
 
 	// Seed 150 rows so both cap (100) and default (20) paths can fill.
@@ -202,7 +202,7 @@ func TestSQLiteStore_Recent_LimitCap(t *testing.T) {
 // (to_session_id, to_agent_id) and only counts unread messages,
 // ignoring messages the agent sent.
 func TestSQLiteStore_UnreadCount(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 	ctx := context.Background()
 
 	// file-a receives 2 messages in sess-1.
@@ -244,7 +244,7 @@ func TestSQLiteStore_UnreadCount(t *testing.T) {
 // TestSQLiteStore_Get_NotFound verifies Get wraps ErrNotFound for a
 // missing ID so the HTTP layer can map to 404.
 func TestSQLiteStore_Get_NotFound(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 	_, err := s.Get(context.Background(), "no-such-id")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("got err=%v, want errors.Is(_, ErrNotFound)", err)
@@ -256,7 +256,7 @@ func TestSQLiteStore_Get_NotFound(t *testing.T) {
 // TestSQLiteStore_Send_DefaultsChannel verifies Send populates
 // Channel to ChannelChat when SendInput.Channel is empty.
 func TestSQLiteStore_Send_DefaultsChannel(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 	out, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-1", FromAgentID: "file-a",
 		ToSessionID: "sess-1", ToAgentID: "file-b",
@@ -274,7 +274,7 @@ func TestSQLiteStore_Send_DefaultsChannel(t *testing.T) {
 // constraint: a channel outside (chat|inbox|alert) is rejected at
 // insert.
 func TestSQLiteStore_Send_InvalidChannelRejected(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 	_, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-1", FromAgentID: "file-a",
 		ToSessionID: "sess-1", ToAgentID: "file-b",
@@ -292,7 +292,7 @@ func TestSQLiteStore_Send_InvalidChannelRejected(t *testing.T) {
 // populates Kind to KindNotification and PayloadJSON to "{}" when the
 // input leaves them empty.
 func TestSQLiteStore_Send_DefaultsKindAndPayload(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 	out, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-1", FromAgentID: "file-a",
 		ToSessionID: "sess-1", ToAgentID: "file-b",
@@ -312,7 +312,7 @@ func TestSQLiteStore_Send_DefaultsKindAndPayload(t *testing.T) {
 // TestSQLiteStore_Send_KindRoundTrip verifies each of the
 // wire kinds persists with its payload and comes back intact via Get.
 func TestSQLiteStore_Send_KindRoundTrip(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 	ctx := context.Background()
 
 	cases := []struct {
@@ -323,7 +323,6 @@ func TestSQLiteStore_Send_KindRoundTrip(t *testing.T) {
 		{KindReply, `{"answer":"noon","in_reply_to":"abc-123"}`},
 		{KindNotification, `{"summary":"build green"}`},
 		{KindHandoff, `{"target_agent":"file-frontend"}`},
-		{KindSubagentResult, `{"summary":"subagent finished"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.kind, func(t *testing.T) {
@@ -354,7 +353,7 @@ func TestSQLiteStore_Send_KindRoundTrip(t *testing.T) {
 // — a kind outside (request|reply|notification|handoff) fails at
 // insert.
 func TestSQLiteStore_Send_InvalidKindRejected(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 	_, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-1", FromAgentID: "file-a",
 		ToSessionID: "sess-1", ToAgentID: "file-b",
@@ -369,7 +368,7 @@ func TestSQLiteStore_Send_InvalidKindRejected(t *testing.T) {
 // TestSQLiteStore_Inbox_FiltersByKind verifies the kind filter
 // narrows inbox results to matching-kind rows only.
 func TestSQLiteStore_Inbox_FiltersByKind(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 	ctx := context.Background()
 
 	kinds := []string{KindRequest, KindReply, KindNotification, KindNotification}
@@ -392,7 +391,6 @@ func TestSQLiteStore_Inbox_FiltersByKind(t *testing.T) {
 		{KindReply, 1},
 		{KindNotification, 2},
 		{KindHandoff, 0},
-		{KindSubagentResult, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.kind, func(t *testing.T) {
@@ -407,46 +405,10 @@ func TestSQLiteStore_Inbox_FiltersByKind(t *testing.T) {
 	}
 }
 
-// TestSQLiteStore_Inbox_SubagentResultKind verifies a
-// kind=subagent_result row is both insertable (past the widened CHECK
-// constraint) and retrievable via the kind filter, alongside unrelated
-// kinds that must not match.
-func TestSQLiteStore_Inbox_SubagentResultKind(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
-	ctx := context.Background()
-
-	if _, err := s.Send(ctx, SendInput{
-		FromSessionID: "sess-1", FromAgentID: "file-researcher",
-		ToSessionID: "sess-1", ToAgentID: "file-a",
-		Kind: KindSubagentResult, Channel: ChannelInbox,
-		Body: "subagent file-researcher ended (completed)", PayloadJSON: `{"summary":"done"}`,
-	}); err != nil {
-		t.Fatalf("seed subagent_result: %v", err)
-	}
-	if _, err := s.Send(ctx, SendInput{
-		FromSessionID: "sess-1", FromAgentID: "file-b",
-		ToSessionID: "sess-1", ToAgentID: "file-a",
-		Kind: KindReply, Body: "unrelated reply",
-	}); err != nil {
-		t.Fatalf("seed reply: %v", err)
-	}
-
-	msgs, err := s.Inbox(ctx, "sess-1", "file-a", InboxFilter{Kind: KindSubagentResult})
-	if err != nil {
-		t.Fatalf("Inbox: %v", err)
-	}
-	if len(msgs) != 1 {
-		t.Fatalf("got %d subagent_result messages, want 1", len(msgs))
-	}
-	if msgs[0].FromAgentID != "file-researcher" {
-		t.Errorf("FromAgentID = %q, want %q", msgs[0].FromAgentID, "file-researcher")
-	}
-}
-
 // TestSQLiteStore_Inbox_FiltersByChannel verifies the channel filter
 // narrows inbox results to matching-channel rows only.
 func TestSQLiteStore_Inbox_FiltersByChannel(t *testing.T) {
-	s, _ := newTestMessagingStore(t)
+	s := newTestMessagingStore(t)
 	ctx := context.Background()
 
 	// Seed: 2 chat, 1 inbox, 1 alert — all to (sess-1, file-a).

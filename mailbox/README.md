@@ -18,40 +18,37 @@ contract.
 `SQLiteStore` accepts an existing `*sql.DB`; it does not create, migrate,
 or close the database. Hosts own schema migrations and connection lifetime.
 `Service` accepts narrow host interfaces for agent lookup, optional sender
-registration, notifications, wake reactions, and tracked asynchronous work.
-The package imports no host application.
+registration, event persistence, handoff coordination, notifications, wake
+reactions, and tracked asynchronous work. The package imports no host
+application and does not name or query host-owned session tables.
 
-The expected host tables are:
+The only table expected by the included adapter is:
 
 - `agent_messages` with the fields represented by `Message`. The
   `channel`, `kind`, `type`, and `status` constraints must admit the
   exported constants.
-- `session_events(id, session_id, event_type, channel,
-  envelope_pointer_json, created_at)` for replay bookkeeping.
-- `session_handoffs(id, session_id, from_agent_id, to_agent_id,
-  requested_by, status, requested_at, approved_at, approved_by_user,
-  context_message_count, notes)`.
-- `session_agents(session_id, agent_id, mode, joined_at, is_primary)`
-  with a unique key on `(session_id, agent_id)`.
-
-Only `agent_messages` is required for direct `SQLiteStore` use.
-`session_events` is required when a DB-backed `Service` sends,
-acknowledges, resolves, or records explicit events. The two handoff tables are
-required only for handoff methods.
+Event storage and handoff state are optional host adapters. `EventStore`
+receives mailbox mutation events and must return the most recent requested
+page in chronological order. `HandoffCoordinator` owns persistence,
+authorization/audit metadata, and any atomic update of the host's session
+model. The mailbox package does not assume table names, agent modes, or
+approval identities.
 
 ## Service composition
 
 ```go
 store := mailbox.NewSQLiteStore(db)
-service := mailbox.NewService(store, db, agentDirectory, agentRegistrar)
+service := mailbox.NewService(store, agentDirectory, agentRegistrar)
+service.SetEventStore(eventStore)
+service.SetHandoffCoordinator(handoffCoordinator)
 service.SetNotificationSink(notificationSink)
 service.SetWakeReactor(wakeReactor)
 service.SetAsyncRunner(lifecycleRunner)
 ```
 
 `AgentResolver` returns existence rather than a host record, and
-`AgentRegistrar` receives an opaque `RegisterAs` hint. Record shape and
-registration policy therefore remain in the host.
+`AgentRegistrar` receives an opaque `RegisterAs` hint. Record shape,
+synthetic identities, and registration policy therefore remain in the host.
 
 ## Concurrency and shutdown
 
@@ -59,7 +56,9 @@ registration policy therefore remain in the host.
 collaborators are. Live subscriptions use a bounded buffer of 16 messages.
 Publishing is non-blocking; a slow subscriber drops only its own delivery.
 Canceling the subscription context removes and closes that channel. Call
-`Service.Close` during shutdown to close every remaining subscription.
+`Service.Close` during shutdown to close every remaining subscription. A
+subscription admitted before `Close` is closed by it; one attempted after
+`Close` returns `ErrClosed`.
 
 Wake reactions receive a copy of the persisted message and run asynchronously.
 Configure `AsyncRunner` when those goroutines must be tracked and drained;

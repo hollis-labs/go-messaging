@@ -1,19 +1,5 @@
 package mailbox
 
-// Every messaging mutation produces one or two rows in session_events so
-// host replay tooling can reconstruct session activity chronologically.
-//
-// The mailbox event types are:
-//
-//	message_sent      — recorded on the sender's session
-//	message_received  — recorded on the recipient's session
-//	message_acked     — recorded on the recipient's session on ack
-//	message_resolved  — recorded on the recipient's session on resolve
-//
-// Cross-session sends produce two rows (one per session). Same-
-// session sends still produce two rows — "you sent" and "you
-// received" are distinct events when the same agent ID isn't on
-// both ends, and when it is the caller can collapse on read.
 import (
 	"context"
 	"encoding/json"
@@ -24,36 +10,25 @@ import (
 	"github.com/google/uuid"
 )
 
-// Session event-type constants. Kept as plain strings rather than a
-// typed enum so later event producers (tool calls, user responses)
-// can share the column without cross-package dependencies.
+// Message-event types describe mailbox mutations only. Runtime, prompt,
+// compaction, and provider lifecycle vocabularies belong to the host that
+// produces them.
 const (
 	EventMessageSent     = "message_sent"
 	EventMessageReceived = "message_received"
 	EventMessageAcked    = "message_acked"
 	EventMessageResolved = "message_resolved"
-
-	// PTY / CLI turn lifecycle events. Written by the chat-service layer
-	// (not the messaging layer) for PTY-provider sessions. These allow
-	// session_diagnose to reconstruct what happened in a PTY turn
-	// without having to grep logs.
-	EventPTYTurnStart    = "pty_turn_start"
-	EventPTYTurnComplete = "pty_turn_complete"
-	EventPTYTurnFailed   = "pty_turn_failed"
-
-	// Compaction lifecycle events for hosts that record context reduction.
-	EventContextPreCompact  = "context_pre_compact"
-	EventContextPostCompact = "context_post_compact"
-
-	// EventHarnessTriggeredTurn distinguishes runtime-initiated turns from
-	// user-initiated turns in replay and audit streams.
-	EventHarnessTriggeredTurn = "harness_triggered_turn"
 )
 
-// SessionEvent is a single row in session_events, surfaced for
-// replay. Each event's payload lives in EnvelopePointerJSON so
-// future event types (tool_call, user_response) can ride the same
-// table with different shapes.
+const (
+	defaultSessionEventLimit = 100
+	maxSessionEventLimit     = 500
+)
+
+// SessionEvent is a host-persistable record of a mailbox mutation. The
+// envelope pointer contains the mailbox message identity and address tuple;
+// hosts may store it alongside unrelated event families without teaching this
+// package about those families.
 type SessionEvent struct {
 	ID                  string `json:"id"`
 	SessionID           string `json:"session_id"`
@@ -63,9 +38,17 @@ type SessionEvent struct {
 	CreatedAt           string `json:"created_at"`
 }
 
-// messagePointer is the envelope_pointer_json shape for a messaging
-// event. Carries enough context to rehydrate the envelope without
-// re-fetching for common cases (unread chip, sidebar summary).
+// EventStore is the host-owned persistence seam for mailbox events.
+//
+// Recent must return the most recent limit events for sessionID in
+// chronological order (oldest first within that recent page). Implementations
+// backed by SQL commonly select DESC with LIMIT and reverse the selected page;
+// ASC with LIMIT returns the oldest page and violates this contract.
+type EventStore interface {
+	Append(ctx context.Context, event SessionEvent) error
+	Recent(ctx context.Context, sessionID string, limit int) ([]SessionEvent, error)
+}
+
 type messagePointer struct {
 	MessageID     string `json:"message_id"`
 	FromSessionID string `json:"from_session_id"`
@@ -76,106 +59,61 @@ type messagePointer struct {
 	Kind          string `json:"kind,omitempty"`
 }
 
-// writeMessageEvent inserts a single session_events row. Failures are
-// logged but not propagated — missing an event row is worse than
-// failing a successful send, and the messaging row is still the
-// authoritative record of the action.
-func (svc *Service) writeMessageEvent(ctx context.Context, sessionID, eventType string, m *Message) {
-	if svc.db == nil || sessionID == "" || m == nil {
+// writeMessageEvent appends one best-effort mailbox event through the host
+// seam. The persisted message remains authoritative, so an event-store failure
+// is logged without changing the already-successful mailbox mutation.
+func writeMessageEvent(ctx context.Context, events EventStore, sessionID, eventType string, msg *Message) {
+	if events == nil || sessionID == "" || msg == nil {
 		return
 	}
-	ptr := messagePointer{
-		MessageID:     m.ID,
-		FromSessionID: m.FromSessionID,
-		FromAgentID:   m.FromAgentID,
-		ToSessionID:   m.ToSessionID,
-		ToAgentID:     m.ToAgentID,
-		ThreadID:      m.ThreadID,
-		Kind:          m.Kind,
-	}
-	payload, err := json.Marshal(ptr)
+	pointer, err := json.Marshal(messagePointer{
+		MessageID:     msg.ID,
+		FromSessionID: msg.FromSessionID,
+		FromAgentID:   msg.FromAgentID,
+		ToSessionID:   msg.ToSessionID,
+		ToAgentID:     msg.ToAgentID,
+		ThreadID:      msg.ThreadID,
+		Kind:          msg.Kind,
+	})
 	if err != nil {
-		slog.Warn("messaging: marshal event pointer", "err", err, "message_id", m.ID, "event_type", eventType)
+		slog.Warn("mailbox: marshal event pointer", "err", err, "message_id", msg.ID, "event_type", eventType)
 		return
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := svc.db.ExecContext(ctx,
-		`INSERT INTO session_events (id, session_id, event_type, channel, envelope_pointer_json, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		uuid.New().String(), sessionID, eventType, m.Channel, string(payload), now,
-	); err != nil {
-		slog.Warn("messaging: write session event", "err", err,
-			"session_id", sessionID, "event_type", eventType, "message_id", m.ID)
+	event := SessionEvent{
+		ID:                  uuid.NewString(),
+		SessionID:           sessionID,
+		EventType:           eventType,
+		Channel:             msg.Channel,
+		EnvelopePointerJSON: string(pointer),
+		CreatedAt:           time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if err := events.Append(ctx, event); err != nil {
+		slog.Warn("mailbox: append event", "err", err,
+			"session_id", sessionID, "event_type", eventType, "message_id", msg.ID)
 	}
 }
 
-// writeSendEvents records the bookkeeping for a newly-sent message
-// — one row per session involved. The From and To sessions may be
-// the same; in that case two rows are still written so "you sent"
-// and "the receiving agent got it" stay distinct events in replay.
-func (svc *Service) writeSendEvents(ctx context.Context, m *Message) {
-	svc.writeMessageEvent(ctx, m.FromSessionID, EventMessageSent, m)
-	svc.writeMessageEvent(ctx, m.ToSessionID, EventMessageReceived, m)
+func writeSendEvents(ctx context.Context, events EventStore, msg *Message) {
+	writeMessageEvent(ctx, events, msg.FromSessionID, EventMessageSent, msg)
+	writeMessageEvent(ctx, events, msg.ToSessionID, EventMessageReceived, msg)
 }
 
-// WriteSessionEvent inserts a single session_events row with an arbitrary
-// event type and payload. This is the public entry point for non-messaging
-// producers (e.g., the chat-service PTY turn lifecycle emitter). Callers
-// must supply a non-empty sessionID and eventType. payloadJSON may be empty,
-// in which case "{}" is stored. Failures are logged but never returned — same
-// fire-and-forget contract as writeMessageEvent.
-func (svc *Service) WriteSessionEvent(ctx context.Context, sessionID, eventType, channel, payloadJSON string) {
-	if svc.db == nil || sessionID == "" || eventType == "" {
-		return
-	}
-	if payloadJSON == "" {
-		payloadJSON = "{}"
-	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := svc.db.ExecContext(ctx,
-		`INSERT INTO session_events (id, session_id, event_type, channel, envelope_pointer_json, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		uuid.New().String(), sessionID, eventType, channel, payloadJSON, now,
-	); err != nil {
-		slog.Warn("messaging: write session event (external)", "err", err,
-			"session_id", sessionID, "event_type", eventType)
-	}
-}
-
-// SessionEvents returns the recent event rows for a session in
-// chronological order (oldest first). Hard cap of 500 rows per call
-// to bound memory — same defensive pattern as Recent messages.
+// SessionEvents returns the most recent event page in chronological order.
+// The host EventStore owns persistence and must implement the ordering
+// contract documented on EventStore.Recent.
 func (svc *Service) SessionEvents(ctx context.Context, sessionID string, limit int) ([]SessionEvent, error) {
-	if svc.db == nil {
-		return nil, nil
+	if sessionID == "" {
+		return nil, fmt.Errorf("%w: session_id required", ErrValidation)
 	}
 	if limit <= 0 {
-		limit = 100
+		limit = defaultSessionEventLimit
 	}
-	if limit > 500 {
-		limit = 500
+	if limit > maxSessionEventLimit {
+		limit = maxSessionEventLimit
 	}
-	rows, err := svc.db.QueryContext(ctx,
-		`SELECT id, session_id, event_type, channel, envelope_pointer_json, created_at
-		 FROM session_events
-		 WHERE session_id = ?
-		 ORDER BY created_at ASC, rowid ASC
-		 LIMIT ?`, sessionID, limit,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("session events: %w", err)
+	events := svc.snapshotHooks().events
+	if events == nil {
+		return nil, fmt.Errorf("%w: event store", ErrNotConfigured)
 	}
-	defer func() {
-		_ = rows.Close() // Query and iteration errors are surfaced separately; deferred close is cleanup only.
-	}()
-
-	out := make([]SessionEvent, 0)
-	for rows.Next() {
-		var e SessionEvent
-		if err := rows.Scan(&e.ID, &e.SessionID, &e.EventType, &e.Channel, &e.EnvelopePointerJSON, &e.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan session event: %w", err)
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
+	return events.Recent(ctx, sessionID, limit)
 }

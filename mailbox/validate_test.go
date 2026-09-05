@@ -49,10 +49,10 @@ func newFakeResolver(ids ...string) *fakeResolver {
 	return &fakeResolver{known: m, hints: make(map[string]string)}
 }
 
-func TestValidateAgentID_User(t *testing.T) {
-	// The "user" sentinel is always valid — resolver not consulted.
-	if err := ValidateAgentID(context.Background(), nil, UserSentinel); err != nil {
-		t.Errorf("user sentinel rejected: %v", err)
+func TestValidateAgentID_HostKnownSyntheticIdentity(t *testing.T) {
+	r := newFakeResolver(testHumanID)
+	if err := ValidateAgentID(context.Background(), r, testHumanID); err != nil {
+		t.Errorf("resolver-known synthetic identity rejected: %v", err)
 	}
 }
 
@@ -87,8 +87,12 @@ func TestValidateAgentID_Empty(t *testing.T) {
 }
 
 func TestValidateAgentID_NilResolver(t *testing.T) {
-	// Anything other than the user sentinel requires a resolver.
+	// Every identity requires a resolver; there are no package-level privileged
+	// sentinels.
 	if err := ValidateAgentID(context.Background(), nil, "file-backend"); err == nil {
-		t.Error("expected rejection when resolver is nil and id is not the user sentinel")
+		t.Error("expected rejection when resolver is nil")
+	}
+	if err := ValidateAgentID(context.Background(), nil, testHumanID); err == nil {
+		t.Error("expected synthetic identity rejection when resolver is nil")
 	}
 }

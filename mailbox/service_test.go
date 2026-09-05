@@ -11,12 +11,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+const testHumanID = "host-human"
+
 // newTestMessagingStore spins up a fresh file-backed SQLite store in a
 // temp dir, runs all embedded migrations, and returns a SQLiteStore
 // wrapping its DB plus a helper for tests that need to seed rows directly.
 // A file-backed DB (rather than :memory:) avoids
 // any surprise around shared-cache semantics on modernc.org/sqlite.
-func newTestMessagingStore(t *testing.T) (*SQLiteStore, *testDB) {
+func newTestMessagingStore(t *testing.T) *SQLiteStore {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -28,24 +30,24 @@ func newTestMessagingStore(t *testing.T) (*SQLiteStore, *testDB) {
 		t.Fatalf("create test schema: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	parent := &testDB{DB: db}
-	return NewSQLiteStore(db), parent
+	return NewSQLiteStore(db)
 }
 
 // newTestService wires up a Service backed by a fresh messaging store
-// and a fakeResolver that knows the supplied agent IDs. Returns the
-// Service plus the SQLiteStore (for message seeding) plus the parent
-// test database helper (for session/session-agent seeding in handoff tests).
+// and a fakeResolver that knows the supplied agent IDs plus the host-owned
+// synthetic human identity used by these tests. Returns the
+// Service plus the SQLiteStore for message seeding.
 //
 // Passes nil as the registrar so tests that expect
 // unknown from_agent_id to reject through ValidateAgentID keep that
 // behavior. Registration tests construct their own Service with a
 // non-nil registrar.
-func newTestService(t *testing.T, knownAgents ...string) (*Service, *SQLiteStore, *testDB) {
+func newTestService(t *testing.T, knownAgents ...string) (*Service, *SQLiteStore) {
 	t.Helper()
-	ms, parent := newTestMessagingStore(t)
+	ms := newTestMessagingStore(t)
+	knownAgents = append(knownAgents, testHumanID)
 	r := newFakeResolver(knownAgents...)
-	return NewService(ms, parent.DB, r, nil), ms, parent
+	return NewService(ms, r, nil), ms
 }
 
 // baseInput builds a minimal valid SendInput for tests that only care
@@ -63,12 +65,12 @@ func baseInput(from, to string) SendInput {
 // --- Auto-register on first message_send ---
 
 // TestService_SendMessage_AutoRegistersUnknownFrom covers the happy
-// path: an unknown from_agent_id with a wired registrar gets inserted
-// as kind='external' and the send proceeds.
+// path: an unknown from_agent_id with a wired registrar is delegated to the
+// host and the send proceeds.
 func TestService_SendMessage_AutoRegistersUnknownFrom(t *testing.T) {
-	ms, parent := newTestMessagingStore(t)
+	ms := newTestMessagingStore(t)
 	r := newFakeResolver("file-backend")
-	svc := NewService(ms, parent.DB, r, r)
+	svc := NewService(ms, r, r)
 
 	in := SendInput{
 		FromSessionID: "sess-1",
@@ -92,12 +94,12 @@ func TestService_SendMessage_AutoRegistersUnknownFrom(t *testing.T) {
 	}
 }
 
-// TestService_SendMessage_AutoRegisterAsCLI covers the case where the caller
-// flags register_as=cli: the inserted profile's kind is 'cli'.
-func TestService_SendMessage_AutoRegisterAsCLI(t *testing.T) {
-	ms, parent := newTestMessagingStore(t)
+// TestService_SendMessage_ForwardsRegistrationHint covers the opaque hint
+// path without assigning meaning to it in the shared package.
+func TestService_SendMessage_ForwardsRegistrationHint(t *testing.T) {
+	ms := newTestMessagingStore(t)
 	r := newFakeResolver("file-backend")
-	svc := NewService(ms, parent.DB, r, r)
+	svc := NewService(ms, r, r)
 
 	in := SendInput{
 		FromSessionID: "sess-1",
@@ -119,9 +121,9 @@ func TestService_SendMessage_AutoRegisterAsCLI(t *testing.T) {
 // path: if Service has no registrar, unknown from_agent_id still
 // errors through ValidateAgentID.
 func TestService_SendMessage_NoRegistrarStillRejects(t *testing.T) {
-	ms, parent := newTestMessagingStore(t)
+	ms := newTestMessagingStore(t)
 	r := newFakeResolver("file-backend")
-	svc := NewService(ms, parent.DB, r, nil)
+	svc := NewService(ms, r, nil)
 
 	_, err := svc.SendMessage(context.Background(), SendInput{
 		FromSessionID: "sess-1",
@@ -138,30 +140,30 @@ func TestService_SendMessage_NoRegistrarStillRejects(t *testing.T) {
 	}
 }
 
-// TestService_SendMessage_AutoRegisterSkipsUserSentinel covers the
-// carve-out: the user sentinel never produces a profile row even with
-// a registrar wired in.
-func TestService_SendMessage_AutoRegisterSkipsUserSentinel(t *testing.T) {
-	ms, parent := newTestMessagingStore(t)
-	r := newFakeResolver("file-backend")
-	svc := NewService(ms, parent.DB, r, r)
+// TestService_SendMessage_HostKnownSyntheticIdentity is a policy-neutral
+// proof that a host may expose a synthetic identity through AgentResolver.
+// Because it already resolves, Service does not ask the registrar to create it.
+func TestService_SendMessage_HostKnownSyntheticIdentity(t *testing.T) {
+	ms := newTestMessagingStore(t)
+	r := newFakeResolver("file-backend", testHumanID)
+	svc := NewService(ms, r, r)
 
 	if _, err := svc.SendMessage(context.Background(), SendInput{
 		FromSessionID: "sess-1",
-		FromAgentID:   UserSentinel,
+		FromAgentID:   testHumanID,
 		ToSessionID:   "sess-1",
 		ToAgentID:     "file-backend",
 		Body:          "hi",
 	}); err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
-	if exists, err := r.AgentExists(context.Background(), UserSentinel); err != nil || exists {
-		t.Error("user sentinel should not produce an agent_profiles row")
+	if got := r.registrationHint(testHumanID); got != "" {
+		t.Errorf("registration hint = %q, want empty for resolver-known identity", got)
 	}
 }
 
 func TestService_SendMessage_RejectsUnknownTo(t *testing.T) {
-	svc, _, _ := newTestService(t, "file-backend")
+	svc, _ := newTestService(t, "file-backend")
 	msg := baseInput("file-backend", "file-nonexistent")
 
 	_, err := svc.SendMessage(context.Background(), msg)
@@ -174,7 +176,7 @@ func TestService_SendMessage_RejectsUnknownTo(t *testing.T) {
 }
 
 func TestService_SendMessage_RejectsUnknownFrom(t *testing.T) {
-	svc, _, _ := newTestService(t, "file-backend")
+	svc, _ := newTestService(t, "file-backend")
 	msg := baseInput("file-nonexistent", "file-backend")
 
 	_, err := svc.SendMessage(context.Background(), msg)
@@ -186,13 +188,13 @@ func TestService_SendMessage_RejectsUnknownFrom(t *testing.T) {
 	}
 }
 
-func TestService_SendMessage_AcceptsUserSentinel(t *testing.T) {
-	// Resolver knows file-backend. The user sentinel short-circuits validation,
-	// so it must work on either side of the send.
-	svc, _, _ := newTestService(t, "file-backend")
+func TestService_SendMessage_AcceptsHostKnownSyntheticIdentity(t *testing.T) {
+	// The shared service applies the same resolver rule on both sides; the host
+	// chooses which synthetic identities its resolver recognizes.
+	svc, _ := newTestService(t, "file-backend")
 
 	// user -> file-backend
-	msg1 := baseInput(UserSentinel, "file-backend")
+	msg1 := baseInput(testHumanID, "file-backend")
 	out, err := svc.SendMessage(context.Background(), msg1)
 	if err != nil {
 		t.Fatalf("user -> file-backend: unexpected error: %v", err)
@@ -200,12 +202,12 @@ func TestService_SendMessage_AcceptsUserSentinel(t *testing.T) {
 	if out == nil || out.ID == "" {
 		t.Fatal("expected persisted message with non-empty ID")
 	}
-	if out.FromAgentID != UserSentinel || out.ToAgentID != "file-backend" {
+	if out.FromAgentID != testHumanID || out.ToAgentID != "file-backend" {
 		t.Errorf("addressing not preserved: from=%q to=%q", out.FromAgentID, out.ToAgentID)
 	}
 
 	// file-backend -> user
-	msg2 := baseInput("file-backend", UserSentinel)
+	msg2 := baseInput("file-backend", testHumanID)
 	out2, err := svc.SendMessage(context.Background(), msg2)
 	if err != nil {
 		t.Fatalf("file-backend -> user: unexpected error: %v", err)
@@ -216,27 +218,27 @@ func TestService_SendMessage_AcceptsUserSentinel(t *testing.T) {
 }
 
 func TestService_SendMessage_RequiresFields(t *testing.T) {
-	svc, _, _ := newTestService(t, "file-backend")
+	svc, _ := newTestService(t, "file-backend")
 
 	// SendInput is a value type — no nil case; an empty input trips
 	// the field validation below instead.
 
 	// missing FromSessionID
-	m := baseInput("file-backend", UserSentinel)
+	m := baseInput("file-backend", testHumanID)
 	m.FromSessionID = ""
 	if _, err := svc.SendMessage(context.Background(), m); err == nil || !strings.Contains(err.Error(), "from_session_id") {
 		t.Errorf("expected from_session_id error, got: %v", err)
 	}
 
 	// missing ToSessionID
-	m = baseInput("file-backend", UserSentinel)
+	m = baseInput("file-backend", testHumanID)
 	m.ToSessionID = ""
 	if _, err := svc.SendMessage(context.Background(), m); err == nil || !strings.Contains(err.Error(), "to_session_id") {
 		t.Errorf("expected to_session_id error, got: %v", err)
 	}
 
 	// missing Body
-	m = baseInput("file-backend", UserSentinel)
+	m = baseInput("file-backend", testHumanID)
 	m.Body = ""
 	if _, err := svc.SendMessage(context.Background(), m); err == nil || !strings.Contains(err.Error(), "body") {
 		t.Errorf("expected body error, got: %v", err)
@@ -244,14 +246,14 @@ func TestService_SendMessage_RequiresFields(t *testing.T) {
 }
 
 func TestService_Inbox(t *testing.T) {
-	svc, s, _ := newTestService(t, "file-backend")
+	svc, s := newTestService(t, "file-backend")
 
 	// Seed 2 messages directly via store (bypassing validation) so we can
 	// test the read path in isolation.
 	for i := 0; i < 2; i++ {
 		if _, err := s.Send(context.Background(), SendInput{
 			FromSessionID: "sess-other",
-			FromAgentID:   UserSentinel,
+			FromAgentID:   testHumanID,
 			ToSessionID:   "sess-1",
 			ToAgentID:     "file-backend",
 			Body:          "msg",
@@ -270,7 +272,7 @@ func TestService_Inbox(t *testing.T) {
 }
 
 func TestService_Thread(t *testing.T) {
-	svc, s, _ := newTestService(t, "file-backend")
+	svc, s := newTestService(t, "file-backend")
 
 	// Seed 3 messages sharing a thread_id. The store's Thread query
 	// tiebreaks on rowid ASC so same-tick inserts remain deterministic.
@@ -278,7 +280,7 @@ func TestService_Thread(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		if _, err := s.Send(context.Background(), SendInput{
 			FromSessionID: "sess-1",
-			FromAgentID:   UserSentinel,
+			FromAgentID:   testHumanID,
 			ToSessionID:   "sess-1",
 			ToAgentID:     "file-backend",
 			ThreadID:      threadID,
@@ -304,10 +306,10 @@ func TestService_Thread(t *testing.T) {
 }
 
 func TestService_Ack(t *testing.T) {
-	svc, s, _ := newTestService(t, "file-backend")
+	svc, s := newTestService(t, "file-backend")
 	seeded, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-1",
-		FromAgentID:   UserSentinel,
+		FromAgentID:   testHumanID,
 		ToSessionID:   "sess-1",
 		ToAgentID:     "file-backend",
 		Body:          "hi",
@@ -330,10 +332,10 @@ func TestService_Ack(t *testing.T) {
 }
 
 func TestService_Ack_RejectsUnknownAgent(t *testing.T) {
-	svc, s, _ := newTestService(t, "file-backend")
+	svc, s := newTestService(t, "file-backend")
 	seeded, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-1",
-		FromAgentID:   UserSentinel,
+		FromAgentID:   testHumanID,
 		ToSessionID:   "sess-1",
 		ToAgentID:     "file-backend",
 		Body:          "hi",
@@ -347,10 +349,10 @@ func TestService_Ack_RejectsUnknownAgent(t *testing.T) {
 }
 
 func TestService_Resolve(t *testing.T) {
-	svc, s, _ := newTestService(t, "file-backend")
+	svc, s := newTestService(t, "file-backend")
 	seeded, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-1",
-		FromAgentID:   UserSentinel,
+		FromAgentID:   testHumanID,
 		ToSessionID:   "sess-1",
 		ToAgentID:     "file-backend",
 		Body:          "hi",
@@ -373,14 +375,13 @@ func TestService_Resolve(t *testing.T) {
 }
 
 func TestService_RecentForSession(t *testing.T) {
-	svc, s, _ := newTestService(t, "file-backend")
+	svc, s := newTestService(t, "file-backend")
 
-	// Seed 4 messages in sess-1. Use the user sentinel on both sides so we
-	// don't rely on store agent rows existing.
+	// Seed 4 messages in sess-1 with the host-owned synthetic identity.
 	for i := 0; i < 4; i++ {
 		if _, err := s.Send(context.Background(), SendInput{
 			FromSessionID: "sess-1",
-			FromAgentID:   UserSentinel,
+			FromAgentID:   testHumanID,
 			ToSessionID:   "sess-1",
 			ToAgentID:     "file-backend",
 			Body:          "msg",
@@ -414,10 +415,10 @@ func TestService_RecentForSession(t *testing.T) {
 func TestService_Ack_ForbidsNonRecipient(t *testing.T) {
 	// Resolver knows both agents so validation passes; ownership check
 	// is what must reject.
-	svc, s, _ := newTestService(t, "file-backend", "file-frontend")
+	svc, s := newTestService(t, "file-backend", "file-frontend")
 	seeded, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-1",
-		FromAgentID:   UserSentinel,
+		FromAgentID:   testHumanID,
 		ToSessionID:   "sess-1",
 		ToAgentID:     "file-backend",
 		Body:          "hi",
@@ -442,7 +443,7 @@ func TestService_Ack_ForbidsNonRecipient(t *testing.T) {
 			// Re-seed so we get a fresh unread msg each subtest.
 			fresh, err := s.Send(context.Background(), SendInput{
 				FromSessionID: "sess-1",
-				FromAgentID:   UserSentinel,
+				FromAgentID:   testHumanID,
 				ToSessionID:   "sess-1",
 				ToAgentID:     "file-backend",
 				Body:          "hi",
@@ -465,7 +466,7 @@ func TestService_Ack_ForbidsNonRecipient(t *testing.T) {
 // TestService_Resolve_ForbidsNonRecipient covers F01 on Resolve — same
 // shape as Ack.
 func TestService_Resolve_ForbidsNonRecipient(t *testing.T) {
-	svc, s, _ := newTestService(t, "file-backend", "file-frontend")
+	svc, s := newTestService(t, "file-backend", "file-frontend")
 
 	cases := []struct {
 		name      string
@@ -481,7 +482,7 @@ func TestService_Resolve_ForbidsNonRecipient(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fresh, err := s.Send(context.Background(), SendInput{
 				FromSessionID: "sess-1",
-				FromAgentID:   UserSentinel,
+				FromAgentID:   testHumanID,
 				ToSessionID:   "sess-1",
 				ToAgentID:     "file-backend",
 				Body:          "hi",
@@ -507,7 +508,7 @@ func TestService_Resolve_ForbidsNonRecipient(t *testing.T) {
 // only messages they are a participant of, and an unrelated agent sees
 // an empty slice (no existence leak).
 func TestService_Thread_FiltersByParticipant(t *testing.T) {
-	svc, s, _ := newTestService(t, "file-backend", "file-frontend", "file-stranger")
+	svc, s := newTestService(t, "file-backend", "file-frontend", "file-stranger")
 
 	threadID := "thread-participants"
 	// Two messages: backend→frontend, frontend→backend.
@@ -566,7 +567,7 @@ func TestService_Thread_FiltersByParticipant(t *testing.T) {
 // (sessionID, agentID) target and (callerSessionID, callerAgentID)
 // returns ErrForbidden without touching the store.
 func TestService_Inbox_RequiresCallerMatch(t *testing.T) {
-	svc, _, _ := newTestService(t, "file-backend")
+	svc, _ := newTestService(t, "file-backend")
 
 	cases := []struct {
 		name          string
@@ -604,14 +605,14 @@ func TestService_Inbox_RequiresCallerMatch(t *testing.T) {
 // 100000 rows gets clamped to MaxRecentLimit; a caller asking for a
 // non-positive limit gets the default 20 (service and store agree).
 func TestService_RecentForSession_LimitCap(t *testing.T) {
-	svc, s, _ := newTestService(t, "file-backend")
+	svc, s := newTestService(t, "file-backend")
 
 	// Seed 150 messages so both cap (100) and default (20) paths can
 	// actually fill.
 	for i := 0; i < 150; i++ {
 		if _, err := s.Send(context.Background(), SendInput{
 			FromSessionID: "sess-1",
-			FromAgentID:   UserSentinel,
+			FromAgentID:   testHumanID,
 			ToSessionID:   "sess-1",
 			ToAgentID:     "file-backend",
 			Body:          "msg",
@@ -649,12 +650,12 @@ func TestService_RecentForSession_DefaultLimit(t *testing.T) {
 	// verify by seeding more than 20 messages and confirming exactly 20
 	// come back — proving the Service default (20), not the store's
 	// default (50), took effect.
-	svc, s, _ := newTestService(t, "file-backend")
+	svc, s := newTestService(t, "file-backend")
 
 	for i := 0; i < 25; i++ {
 		if _, err := s.Send(context.Background(), SendInput{
 			FromSessionID: "sess-1",
-			FromAgentID:   UserSentinel,
+			FromAgentID:   testHumanID,
 			ToSessionID:   "sess-1",
 			ToAgentID:     "file-backend",
 			Body:          "msg",
@@ -675,12 +676,12 @@ func TestService_RecentForSession_DefaultLimit(t *testing.T) {
 // TestService_UnreadCount_NoCallerFallsOpen confirms that without a
 // CallerIdentity, UnreadCount remains a trusted in-process pass-through.
 func TestService_UnreadCount_NoCallerFallsOpen(t *testing.T) {
-	svc, s, _ := newTestService(t, "file-backend")
+	svc, s := newTestService(t, "file-backend")
 
 	for i := 0; i < 3; i++ {
 		if _, err := s.Send(context.Background(), SendInput{
 			FromSessionID: "sess-other",
-			FromAgentID:   UserSentinel,
+			FromAgentID:   testHumanID,
 			ToSessionID:   "sess-1",
 			ToAgentID:     "file-backend",
 			Body:          "msg",
@@ -702,11 +703,11 @@ func TestService_UnreadCount_NoCallerFallsOpen(t *testing.T) {
 // ctx carries a CallerIdentity matching the target tuple, the service
 // returns the count normally.
 func TestService_UnreadCount_CallerMatch(t *testing.T) {
-	svc, s, _ := newTestService(t, "file-backend")
+	svc, s := newTestService(t, "file-backend")
 
 	if _, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-other",
-		FromAgentID:   UserSentinel,
+		FromAgentID:   testHumanID,
 		ToSessionID:   "sess-1",
 		ToAgentID:     "file-backend",
 		Body:          "msg",
@@ -731,7 +732,7 @@ func TestService_UnreadCount_CallerMatch(t *testing.T) {
 // context caller that does not match the target inbox owner returns
 // ErrForbidden.
 func TestService_UnreadCount_CallerMismatchForbidden(t *testing.T) {
-	svc, _, _ := newTestService(t, "file-backend", "file-frontend")
+	svc, _ := newTestService(t, "file-backend", "file-frontend")
 
 	ctx := WithCaller(context.Background(), CallerIdentity{
 		SessionID: "sess-1",

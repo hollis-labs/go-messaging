@@ -8,10 +8,6 @@ const (
 	KindReply        = "reply"
 	KindNotification = "notification"
 	KindHandoff      = "handoff"
-	// KindSubagentResult marks a subagent completion/failure notification.
-	// It is distinct from KindReply so runtimes can filter completions
-	// without matching ordinary agent replies.
-	KindSubagentResult = "subagent_result"
 )
 
 // Channel constants name the transport bucket a message travels on.
@@ -87,11 +83,9 @@ type SendInput struct {
 	ReplyTo     string
 	Metadata    string
 	Priority    int
-	// RegisterAs is an opaque hint for optional auto-registration when
-	// FromAgentID is not yet in agent_profiles. Empty (default)
-	// registers the caller as kind='external'; set to 'cli' to
-	// register as a CLI caller. Ignored if the from_agent_id
-	// already resolves or if Service has no registrar.
+	// RegisterAs is an opaque, host-defined hint for optional
+	// auto-registration. It is ignored when FromAgentID already resolves
+	// or when Service has no registrar.
 	RegisterAs string
 }
 

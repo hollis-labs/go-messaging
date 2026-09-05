@@ -1,6 +1,6 @@
 // Package mailbox — subscribe_test.go
 //
-// Tests for the in-process pubsub that backs MCP streaming subscribers.
+// Tests for the in-process pubsub that backs streaming subscribers.
 // The pubsub has no replay buffer: only messages published AFTER a
 // subscription takes effect are delivered to that subscriber, and slow
 // subscribers are dropped on a full channel (buffer = 16).
@@ -8,6 +8,7 @@ package mailbox
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -17,7 +18,7 @@ import (
 // returns a channel which receives a matching message published after the
 // subscription is established.
 func TestSubscribe_ReceivesNewMessage(t *testing.T) {
-	svc, _, _ := newTestService(t, "file-a")
+	svc, _ := newTestService(t, "file-a")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -29,21 +30,17 @@ func TestSubscribe_ReceivesNewMessage(t *testing.T) {
 
 	msg := SendInput{
 		FromSessionID: "sess-1",
-		FromAgentID:   UserSentinel,
+		FromAgentID:   testHumanID,
 		ToSessionID:   "sess-1",
 		ToAgentID:     "file-a",
 		Body:          "hello",
 	}
 
-	// Publish in a goroutine after a small delay so the receive below is
-	// already blocking on the channel when the send fires. The delay is
-	// deliberate: this test proves live fan-out, not buffered delivery.
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		if _, err := svc.SendMessage(context.Background(), msg); err != nil {
-			t.Errorf("SendMessage: %v", err)
-		}
-	}()
+	// Subscription admission is synchronous and the channel is buffered, so
+	// there is no need for an unjoined sender goroutine.
+	if _, err := svc.SendMessage(context.Background(), msg); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
 
 	select {
 	case received := <-ch:
@@ -65,7 +62,7 @@ func TestSubscribe_ReceivesNewMessage(t *testing.T) {
 // (sessionID, agentID) does not receive messages addressed to a different
 // (sessionID, agentID) pair.
 func TestSubscribe_IgnoresNonMatching(t *testing.T) {
-	svc, _, _ := newTestService(t, "file-a", "file-b")
+	svc, _ := newTestService(t, "file-a", "file-b")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -77,7 +74,7 @@ func TestSubscribe_IgnoresNonMatching(t *testing.T) {
 
 	if _, err := svc.SendMessage(context.Background(), SendInput{
 		FromSessionID: "sess-1",
-		FromAgentID:   UserSentinel,
+		FromAgentID:   testHumanID,
 		ToSessionID:   "sess-1",
 		ToAgentID:     "file-b",
 		Body:          "not for us",
@@ -97,13 +94,13 @@ func TestSubscribe_IgnoresNonMatching(t *testing.T) {
 // a message published before any subscription exists is dropped, and a
 // subsequent subscriber does not receive it.
 func TestSubscribe_NoReplayOnResubscribe(t *testing.T) {
-	svc, _, _ := newTestService(t, "file-a")
+	svc, _ := newTestService(t, "file-a")
 
 	// Publish BEFORE subscribing. There are zero subscribers, so this must
 	// be dropped by the pubsub.
 	if _, err := svc.SendMessage(context.Background(), SendInput{
 		FromSessionID: "sess-1",
-		FromAgentID:   UserSentinel,
+		FromAgentID:   testHumanID,
 		ToSessionID:   "sess-1",
 		ToAgentID:     "file-a",
 		Body:          "old",
@@ -135,7 +132,7 @@ func TestSubscribe_NoReplayOnResubscribe(t *testing.T) {
 // does not strand goroutines blocked on reads of a channel that will
 // never deliver again.
 func TestService_Close_DrainsSubscribers(t *testing.T) {
-	svc, _, _ := newTestService(t, "file-a", "file-b", "file-c")
+	svc, _ := newTestService(t, "file-a", "file-b", "file-c")
 
 	// Three independent subscriptions across two keys. Use separate
 	// ctxs so nothing is canceled when Close fires — only Close should
@@ -195,10 +192,10 @@ func TestService_Close_DrainsSubscribers(t *testing.T) {
 
 // TestSubscribe_CtxCancelReleasesSlot covers the F06/F07 interaction:
 // canceling the subscription ctx must remove the subscriber from the
-// map and close its channel, so a handler that loses its MCP stream
+// map and close its channel, so a handler that loses its transport stream
 // doesn't strand a zombie entry.
 func TestSubscribe_CtxCancelReleasesSlot(t *testing.T) {
-	svc, _, _ := newTestService(t, "file-a")
+	svc, _ := newTestService(t, "file-a")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ch, err := svc.SubscribeSessionAgent(ctx, "sess-1", "file-a")
@@ -208,7 +205,8 @@ func TestSubscribe_CtxCancelReleasesSlot(t *testing.T) {
 
 	// Verify the subscriber is in the map.
 	svc.pub.mu.RLock()
-	before := len(svc.pub.subs["sess-1:file-a"])
+	key := subscriptionKey{sessionID: "sess-1", agentID: "file-a"}
+	before := len(svc.pub.subs[key])
 	svc.pub.mu.RUnlock()
 	if before != 1 {
 		t.Fatalf("pre-cancel subs len=%d, want 1", before)
@@ -229,7 +227,7 @@ func TestSubscribe_CtxCancelReleasesSlot(t *testing.T) {
 	}
 
 	svc.pub.mu.RLock()
-	after := len(svc.pub.subs["sess-1:file-a"])
+	after := len(svc.pub.subs[key])
 	svc.pub.mu.RUnlock()
 	if after != 0 {
 		t.Errorf("post-cancel subs len=%d, want 0", after)
@@ -240,7 +238,7 @@ func TestSubscribe_CtxCancelReleasesSlot(t *testing.T) {
 // Before the fix this reliably panicked with "send on closed channel" under -race
 // within a few iterations.
 func TestSubscribe_PublishUnsubscribeRace(t *testing.T) {
-	svc, _, _ := newTestService(t, "file-a")
+	svc, _ := newTestService(t, "file-a")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 200; i++ {
@@ -255,7 +253,7 @@ func TestSubscribe_PublishUnsubscribeRace(t *testing.T) {
 			defer wg.Done()
 			_, _ = svc.SendMessage(context.Background(), SendInput{
 				FromSessionID: "sess-1",
-				FromAgentID:   UserSentinel,
+				FromAgentID:   testHumanID,
 				ToSessionID:   "sess-1",
 				ToAgentID:     "file-a",
 				Body:          "race",
@@ -263,4 +261,57 @@ func TestSubscribe_PublishUnsubscribeRace(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestSubscribe_AfterCloseRejected(t *testing.T) {
+	svc, _ := newTestService(t, "file-a")
+	if err := svc.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	ch, err := svc.SubscribeSessionAgent(context.Background(), "sess-1", "file-a")
+	if ch != nil {
+		t.Errorf("channel = %v, want nil", ch)
+	}
+	if !errors.Is(err, ErrClosed) {
+		t.Fatalf("error = %v, want ErrClosed", err)
+	}
+}
+
+func TestPubsub_CloseLinearizesSubscriptionAdmission(t *testing.T) {
+	for i := 0; i < 500; i++ {
+		p := newPubsub()
+		ctx, cancel := context.WithCancel(context.Background())
+		var wg sync.WaitGroup
+		wg.Add(2)
+		var ch <-chan *Message
+		var err error
+		go func() {
+			defer wg.Done()
+			ch, err = p.subscribe(ctx, "sess-1", "file-a")
+		}()
+		go func() {
+			defer wg.Done()
+			p.closeAll()
+		}()
+		wg.Wait()
+		cancel()
+
+		if errors.Is(err, ErrClosed) {
+			if ch != nil {
+				t.Fatalf("iteration %d: rejected subscription returned channel", i)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("iteration %d: subscribe: %v", i, err)
+		}
+		select {
+		case _, ok := <-ch:
+			if ok {
+				t.Fatalf("iteration %d: admitted channel remained open", i)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("iteration %d: admitted channel was not closed", i)
+		}
+	}
 }

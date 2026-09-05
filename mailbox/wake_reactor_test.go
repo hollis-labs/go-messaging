@@ -1,11 +1,7 @@
 package mailbox
 
-// Tests for SendMessage's wake-reactor wiring. Proves
-// the insertion point (SendMessage, after writeSendEvents) fires the
-// wired WakeReactor exactly once per eligible send, and — the
-// double-wake guard the ticket calls out explicitly — never for
-// Kind=KindSubagentResult, which already has its own dedicated wake
-// path owned by the host's subagent completion service.
+// Tests for SendMessage's host-owned wake seam. The shared package invokes
+// the hook for every mailbox kind and leaves all filtering to the host.
 
 import (
 	"context"
@@ -35,6 +31,12 @@ func (f *fakeWakeReactor) count() int {
 	return len(f.calls)
 }
 
+func (f *fakeWakeReactor) call(index int) Message {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return *f.calls[index]
+}
+
 func (f *fakeWakeReactor) waitForCount(t *testing.T, want int) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
@@ -50,11 +52,11 @@ func (f *fakeWakeReactor) waitForCount(t *testing.T, want int) {
 }
 
 func TestService_SendMessage_WakesReactorForOrdinaryMessage(t *testing.T) {
-	svc, _, _ := newTestService(t, "file-backend")
+	svc, _ := newTestService(t, "file-backend")
 	wake := &fakeWakeReactor{}
 	svc.SetWakeReactor(wake)
 
-	in := baseInput(UserSentinel, "file-backend")
+	in := baseInput(testHumanID, "file-backend")
 	in.Kind = KindNotification
 	out, err := svc.SendMessage(context.Background(), in)
 	if err != nil {
@@ -62,30 +64,22 @@ func TestService_SendMessage_WakesReactorForOrdinaryMessage(t *testing.T) {
 	}
 
 	wake.waitForCount(t, 1)
-	if wake.calls[0].ID != out.ID {
-		t.Errorf("reactor received message id %q, want %q", wake.calls[0].ID, out.ID)
+	call := wake.call(0)
+	if call.ID != out.ID {
+		t.Errorf("reactor received message id %q, want %q", call.ID, out.ID)
 	}
 }
 
-// TestService_SendMessage_WakesReactorForRequestReplyHandoff closes a
-// test-coverage gap flagged in code review: SendMessage's wake-reactor
-// gate (svc.wake != nil && out.Kind != KindSubagentResult) fires by
-// default for every Kind except KindSubagentResult — not just
-// KindNotification, which was the only kind under direct test before this.
-// That's the actual fix for the poll-only gap this ticket targeted
-// (KindRequest/KindReply/KindHandoff sends should wake the recipient just
-// as much as a plain notification does), so this proves the gate's
-// behavior for those three kinds explicitly rather than leaving it
-// implied by the single-kind coverage above. Purely additive coverage —
-// does not change the gating behavior itself.
-func TestService_SendMessage_WakesReactorForRequestReplyHandoff(t *testing.T) {
-	for _, kind := range []string{KindRequest, KindReply, KindHandoff} {
+// TestService_SendMessage_WakesReactorForEveryMailboxKind proves there is no
+// package-owned wake policy hidden behind a particular kind.
+func TestService_SendMessage_WakesReactorForEveryMailboxKind(t *testing.T) {
+	for _, kind := range []string{KindRequest, KindReply, KindNotification, KindHandoff} {
 		t.Run(kind, func(t *testing.T) {
-			svc, _, _ := newTestService(t, "file-backend")
+			svc, _ := newTestService(t, "file-backend")
 			wake := &fakeWakeReactor{}
 			svc.SetWakeReactor(wake)
 
-			in := baseInput(UserSentinel, "file-backend")
+			in := baseInput(testHumanID, "file-backend")
 			in.Kind = kind
 			out, err := svc.SendMessage(context.Background(), in)
 			if err != nil {
@@ -93,49 +87,14 @@ func TestService_SendMessage_WakesReactorForRequestReplyHandoff(t *testing.T) {
 			}
 
 			wake.waitForCount(t, 1)
-			if wake.calls[0].ID != out.ID {
-				t.Errorf("reactor received message id %q, want %q", wake.calls[0].ID, out.ID)
+			call := wake.call(0)
+			if call.ID != out.ID {
+				t.Errorf("reactor received message id %q, want %q", call.ID, out.ID)
 			}
-			if wake.calls[0].Kind != kind {
-				t.Errorf("reactor received kind %q, want %q", wake.calls[0].Kind, kind)
+			if call.Kind != kind {
+				t.Errorf("reactor received kind %q, want %q", call.Kind, kind)
 			}
 		})
-	}
-}
-
-// TestService_SendMessage_SkipsWakeForSubagentResult is the double-wake
-// guard: kind=subagent_result already has its own dedicated wake path
-// (subagent.CompletionReactor). If SendMessage's generic WakeReactor
-// also fired for this kind, a subagent completion would race two
-// different synthetic-prompt turn triggers against
-// registerGenerationIfIdle.
-func TestService_SendMessage_SkipsWakeForSubagentResult(t *testing.T) {
-	svc, _, _ := newTestService(t, "file-backend")
-	wake := &fakeWakeReactor{}
-	svc.SetWakeReactor(wake)
-
-	in := baseInput(UserSentinel, "file-backend")
-	in.Kind = KindSubagentResult
-	if _, err := svc.SendMessage(context.Background(), in); err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
-
-	// Send a second, ordinary message and wait for ITS wake call — this
-	// gives the (absent) subagent_result wake call every opportunity to
-	// have already landed if the exclusion were broken, without a fixed
-	// sleep.
-	in2 := baseInput(UserSentinel, "file-backend")
-	in2.Kind = KindNotification
-	if _, err := svc.SendMessage(context.Background(), in2); err != nil {
-		t.Fatalf("SendMessage (control): %v", err)
-	}
-	wake.waitForCount(t, 1)
-
-	if wake.count() != 1 {
-		t.Fatalf("expected exactly 1 wake call (the ordinary message only), got %d", wake.count())
-	}
-	if wake.calls[0].Kind != KindNotification {
-		t.Errorf("the single wake call should be for the ordinary message, got kind=%q", wake.calls[0].Kind)
 	}
 }
 
@@ -143,9 +102,9 @@ func TestService_SendMessage_NilWakeReactor_NoOp(t *testing.T) {
 	// No SetWakeReactor call — svc.wake stays nil. Regression guard: a
 	// send must not panic or behave differently when no reactor is wired
 	// (the test-double-without-wiring shape).
-	svc, _, _ := newTestService(t, "file-backend")
+	svc, _ := newTestService(t, "file-backend")
 
-	if _, err := svc.SendMessage(context.Background(), baseInput(UserSentinel, "file-backend")); err != nil {
+	if _, err := svc.SendMessage(context.Background(), baseInput(testHumanID, "file-backend")); err != nil {
 		t.Fatalf("SendMessage with nil wake reactor: %v", err)
 	}
 }
