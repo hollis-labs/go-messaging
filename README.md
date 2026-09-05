@@ -13,6 +13,12 @@ and a shared contract test suite that any third-party `Store` should
 pass. Concrete persistent / networked `Store` implementations are
 provided by consumer applications.
 
+Applications that need a durable, tuple-addressed inbox with
+unread/read/resolved state can use the optional
+[`mailbox`](./mailbox/) subpackage. It is separate because its
+non-destructive inbox and acknowledgement lifecycle intentionally differs
+from the root `Store`'s delivered/consumed contract.
+
 **Status:** pre-1.0 (`v0.x.y`). The contract surface is stable, but
 breaking changes may still occur in minor versions; see
 [CHANGELOG.md](./CHANGELOG.md).
@@ -166,6 +172,10 @@ routing, cross-host transport (the foreign `Store` behind a `Router` route
 is app-supplied — e.g. an HTTP client), federation authentication,
 retry/backoff, tracing hooks, large-binary payloads. These belong in higher
 layers built on top of `Store`.
+
+The optional `mailbox` subpackage is such a higher layer. It supplies
+service orchestration and a SQLite adapter for its distinct durable-inbox
+contract without changing this root interface.
 
 ## Documentation
 

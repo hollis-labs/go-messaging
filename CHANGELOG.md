@@ -10,6 +10,19 @@ out explicitly below.
 ## Unreleased
 
 ### Added
+- Optional `mailbox` subpackage for durable tuple-addressed inboxes with
+  unread/read/resolved lifecycle, priority and thread queries, bounded recent
+  history, in-process live subscriptions, caller identity, session events,
+  transactional primary-agent handoffs, notification/wake hooks, and a
+  host-migrated SQLite adapter. Host-owned agent registration and asynchronous
+  lifecycle behavior enter through narrow interfaces; the root `Store`
+  contract is unchanged.
+
+## v0.3.0 — 2026-05-21
+
+### Added
+- `KindGroup` address kind for addressing a named collection of
+  recipients.
 - `Router` — an authority-routing `Store` decorator. It dispatches each
   operation by the URN `Authority` segment: a registered foreign authority
   goes to that route's `Store`, every other authority falls through to a
