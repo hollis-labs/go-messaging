@@ -9,6 +9,8 @@ out explicitly below.
 
 ## Unreleased
 
+## v0.4.0 — 2026-09-05
+
 ### Added
 - Optional `mailbox` subpackage for durable tuple-addressed inboxes with
   unread/read/resolved lifecycle, priority and thread queries, bounded recent
