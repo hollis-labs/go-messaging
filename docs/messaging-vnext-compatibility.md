@@ -66,3 +66,15 @@ There is no automatic production database mutation in this package. Schema appli
 No existing root or mailbox behavior is deprecated in this local stream. The deprecated pattern is semantic overloading: treating mailbox `Ack` as reliable delivery `host_accepted`, `turn_submitted`, or `consumed`, or treating root/mailbox writes and reliable-delivery writes as two simultaneous authorities for the same logical inbox.
 
 The completed CW-20260905-0013 mailbox extraction remains the mailbox base. This guide adds compatibility projections around it; it does not repeat that extraction or move Nanite adoption into this repository.
+
+## Replayable delivery pump and host handoff
+
+`delivery.NewPump` is a reusable reconciler over `delivery.Store`. It treats live notifications as coalesced hints only. Missed subscribe events, reconnects, and process restarts converge by listing durable ready delivery obligations and claiming them with fenced leases.
+
+The host implements `delivery.Handoff`:
+
+- `Available` decides whether a recipient owner is currently claimable. Returning false leaves the delivery pending and does not burn an attempt, which is the required offline-owner behavior.
+- `RecordDelivery` must durably record the delivery ID and attempt correlation in the host inbox/outbox before the pump writes `host_accepted`.
+- `Submit` performs host policy such as local queueing, wake, or next-turn submission. A successful HTTP response or SendTurn call should set `SubmittedAt`, which records `turn_submitted`; it must not set `ConsumedAt` unless a distinct consumption observation was made.
+
+The pump bounds concurrent workers, owns its reconciliation goroutines until `Run` returns, and uses retry backoff through `Nack` when host recording or submission fails. Duplicate hints and repeated reconciliation are safe because leases, receipt uniqueness, and terminal delivery states are durable store concerns.

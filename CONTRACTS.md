@@ -128,6 +128,13 @@ A host leases a recipient delivery before handoff. Lease records must include a 
 
 Retry state is per recipient delivery. Offline recipients should remain pending or delayed; they should not burn attempts merely because no host is online. Attempts record retryable vs terminal failure, next-at deadlines, and dead-letter disposition.
 
+The reusable delivery pump treats notifications as hints, not proof of delivery.
+It reconciles by listing durable ready obligations and claiming them with bounded
+workers. A host handoff adapter must record the delivery/attempt correlation
+durably before the pump writes `host_accepted`. A queue/HTTP/SendTurn success may
+record `turn_submitted`; it must not be treated as `consumed` without a distinct
+consumer/runtime observation.
+
 ## Rooms and group fanout
 
 A group or room send first resolves the group address under host/service authorization. The resulting recipient set is frozen with the message. Each recipient receives a distinct delivery obligation and receipt trail linked to the same immutable message body. Later membership changes do not move existing retries to new recipients unless a new message/fanout operation is created.
