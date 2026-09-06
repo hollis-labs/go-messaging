@@ -95,6 +95,33 @@ Each accepted send may carry a sender-scoped idempotency key. The durable unique
 
 The digest covers the canonical immutable message content and the resolved recipient set. Retry attempts, leases, runtime observations, and attention state are excluded.
 
+## Durable SQLite delivery store
+
+`delivery.NewSQLiteStore` implements the same `delivery.Store` contract as the
+in-memory reference. It accepts a host-owned `*sql.DB`; callers own connection
+lifetime, PRAGMA configuration, pooling, and schema rollout. `ApplySQLiteSchema`
+creates versioned `messaging_*` delivery tables and indexes. Store mutations are
+transactional: message content, idempotency, recipient obligations, attempts,
+and receipts are committed as one unit or rolled back as one unit. Multi-handle
+claim contention may hit SQLite busy/locked paths, but it must not create a
+second successful lease for one delivery.
+
+SQLite timestamps are stored in fixed-width UTC RFC3339 nanosecond form so
+ready and lease-expiry scans compare correctly in SQL. Query indexes cover
+message fanout lookup, recipient/status ready scans, active leases, attempts,
+and receipts.
+
+`MigrateLegacyMailbox` is a host-invoked migration primitive for the historical
+`agent_messages` mailbox table. It preserves legacy row IDs, thread/reply
+correlation, tuple ownership, `status`, `read_at`, and `resolved_at` in the new
+message metadata and `messaging_legacy_mailbox_imports` audit table. The safe
+default policy imports ambiguous unread rows as dead-lettered obligations that
+require authorized redrive instead of replaying them blindly. Mailbox `Ack` and
+`Resolve` remain attention/history state; migration does not synthesize
+`host_accepted`, `turn_submitted`, or `consumed` receipts from them. Hosts that
+want immediate replay of unread historical rows must choose the explicit
+`LegacyMailboxReplayUnread` policy.
+
 ## Lease, fencing, retry, and dead-letter rules
 
 A host leases a recipient delivery before handoff. Lease records must include a token, holder identity, binding generation, acquisition time, expiry, and attempt ID. Mutating a delivery from a stale token or stale binding generation fails. Expired leases can be reclaimed according to store policy without changing the recipient address.

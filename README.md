@@ -111,6 +111,27 @@ delivery with idempotent effects, not exactly-once model execution. Receipt
 stages such as `host_accepted` and `turn_submitted` are observable handoff
 facts; they do not assert model understanding or task success.
 
+The `delivery` package includes two contract-conformant stores:
+
+- `NewMemoryStore` is the deterministic in-memory reference implementation.
+- `NewSQLiteStore` is a durable implementation over a caller-owned
+  `*sql.DB`. Hosts call `ApplySQLiteSchema` explicitly, choose their own
+  SQLite DSN/PRAGMA/pooling policy, and remain responsible for closing the
+  database handle. Store operations use transactions so message body,
+  sender-scoped idempotency, frozen recipient obligations, attempts, and
+  receipts commit together or roll back together. SQLite busy/locked claim
+  races surface as delivery contention rather than a second successful claim.
+
+`MigrateLegacyMailbox` imports the historical `agent_messages` mailbox table
+into the delivery schema for hosts that opt into migration. It preserves row
+IDs, thread/reply IDs, sender/recipient session-agent ownership tuples, and
+historical `status`, `read_at`, and `resolved_at` values in metadata plus an
+audit table. The default policy holds ambiguous unread legacy rows as
+dead-lettered delivery obligations requiring authorized redrive, so migration
+does not blindly replay old mailbox rows. Historical read/resolved rows are
+preserved as completed history without fabricating `host_accepted`,
+`turn_submitted`, or `consumed` receipts.
+
 ## Federation
 
 The `Authority` segment of every URN is the email-style "domain" that owns
