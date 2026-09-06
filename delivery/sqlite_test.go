@@ -223,7 +223,7 @@ func TestSQLiteStoreContextCancellationAndBusyRollback(t *testing.T) {
 		if _, err := locker.ExecContext(context.Background(), `BEGIN EXCLUSIVE`); err != nil {
 			t.Fatalf("begin exclusive: %v", err)
 		}
-		defer locker.ExecContext(context.Background(), `ROLLBACK`)
+		defer func() { _, _ = locker.ExecContext(context.Background(), `ROLLBACK`) }()
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 		_, err := delivery.NewSQLiteStore(contender).Enqueue(ctx, sqliteBasicRequest("busy", agent("alice"), agent("bob")))
@@ -355,7 +355,7 @@ func explainPlan(t *testing.T, db *sql.DB, query string, args ...any) string {
 	if err != nil {
 		t.Fatalf("explain: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	parts := []string{}
 	for rows.Next() {
 		var id, parent, notused int

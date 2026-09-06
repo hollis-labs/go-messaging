@@ -96,7 +96,7 @@ func MigrateLegacyMailbox(ctx context.Context, db *sql.DB, opts LegacyMailboxMig
 	if err != nil {
 		return LegacyMailboxMigrationResult{}, fmt.Errorf("read legacy mailbox: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result LegacyMailboxMigrationResult
 	for rows.Next() {

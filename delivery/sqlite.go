@@ -322,7 +322,7 @@ func (s *SQLiteStore) ListDeliveries(ctx context.Context, f Filter) ([]Recipient
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return sqliteScanDeliveries(rows)
 }
 
@@ -642,7 +642,7 @@ func (s *SQLiteStore) Attempts(ctx context.Context, deliveryID DeliveryID) ([]At
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return sqliteScanAttempts(rows)
 }
 
@@ -654,7 +654,7 @@ func (s *SQLiteStore) Receipts(ctx context.Context, deliveryID DeliveryID) ([]Re
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Receipt{}
 	for rows.Next() {
 		var r Receipt
@@ -781,7 +781,7 @@ func sqliteInsertMessage(ctx context.Context, q sqliteQueryable, m Message) erro
 	if err != nil {
 		return err
 	}
-	_, err = q.ExecContext(ctx, `INSERT INTO messaging_messages(id, digest, idempotency_key, from_urn, group_urn, kind, channel, thread_id, in_reply_to, payload, content_type, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, m.ID, m.Digest, m.IdempotencyKey, m.From.URN(), urnOrEmpty(m.Group), m.Kind, m.Channel, m.ThreadID, m.InReplyTo, []byte(m.Payload), m.ContentType, string(metadata), timeString(m.CreatedAt))
+	_, err = q.ExecContext(ctx, `INSERT INTO messaging_messages(id, digest, idempotency_key, from_urn, group_urn, kind, channel, thread_id, in_reply_to, payload, content_type, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, m.ID, m.Digest, m.IdempotencyKey, m.From.URN(), urnOrEmpty(m.Group), m.Kind, m.Channel, m.ThreadID, m.InReplyTo, m.Payload, m.ContentType, string(metadata), timeString(m.CreatedAt))
 	return err
 }
 
@@ -982,7 +982,7 @@ func sqliteDeliveriesForMessage(ctx context.Context, q sqliteQueryable, id Messa
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return sqliteScanDeliveries(rows)
 }
 
