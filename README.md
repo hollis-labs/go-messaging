@@ -9,9 +9,9 @@ agent-to-user messaging.
 `Channel`, `Filter`), interfaces (`Store`, `Dispatcher`), and delivery
 semantics so multiple applications can speak the same wire protocol.
 It ships an in-memory reference `Store`, a request/reply `Dispatcher`,
-and a shared contract test suite that any third-party `Store` should
-pass. Concrete persistent / networked `Store` implementations are
-provided by consumer applications.
+a Messaging vNext reliable-delivery reference in `delivery`, and shared
+contract test suites that third-party stores can run. Concrete persistent /
+networked `Store` implementations are provided by consumer applications.
 
 Applications that need a durable, tuple-addressed inbox with
 unread/read/resolved state can use the optional
@@ -103,10 +103,13 @@ request/reply and simple local stores, but it is not a durable host-handoff
 receipt or proof that a model processed the message.
 
 The Messaging vNext reliability contract is specified in
-[`CONTRACTS.md`](./CONTRACTS.md). It separates immutable message content,
+[`CONTRACTS.md`](./CONTRACTS.md) and implemented by the neutral
+[`delivery`](./delivery/) package. It separates immutable message content,
 per-recipient delivery obligations, host/runtime attempts, and independent
 reader attention state. The portable reliability target is at-least-once
-delivery with idempotent effects, not exactly-once model execution.
+delivery with idempotent effects, not exactly-once model execution. Receipt
+stages such as `host_accepted` and `turn_submitted` are observable handoff
+facts; they do not assert model understanding or task success.
 
 ## Federation
 
@@ -171,14 +174,16 @@ guarantees on top of the base contract.
 ## Scope
 
 **In scope:** contract types, interfaces, delivery lifecycle, URN
-addressing, in-memory reference Store, contract test suite, Dispatcher
-request/reply helper, the authority-routing `Router` decorator.
+addressing, in-memory reference Store, reliable `delivery` state machine,
+contract test suites, Dispatcher request/reply helper, and the
+authority-routing `Router` decorator.
 
-**Out of scope (explicitly):** authentication/authorization, escalation
-routing, cross-host transport (the foreign `Store` behind a `Router` route
-is app-supplied — e.g. an HTTP client), federation authentication,
-retry/backoff, tracing hooks, large-binary payloads. These belong in higher
-layers built on top of `Store`.
+**Out of scope for the legacy root `Store` (explicitly):** authentication/
+authorization, escalation routing, cross-host transport (the foreign `Store`
+behind a `Router` route is app-supplied — e.g. an HTTP client), federation
+authentication, tracing hooks, and large-binary payloads. Retry scheduling,
+lease fencing, deadline/dead-letter handling, and authorized redrive live in
+the `delivery` package instead of silently changing root `Inbox`/`Consume`.
 
 The optional `mailbox` subpackage is such a higher layer. It supplies
 service orchestration and a SQLite adapter for its distinct durable-inbox
