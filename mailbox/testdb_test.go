@@ -14,7 +14,7 @@ CREATE TABLE agent_messages (
     body TEXT NOT NULL,
     metadata TEXT DEFAULT '{}',
     priority INTEGER DEFAULT 2,
-    status TEXT DEFAULT 'unread' CHECK(status IN ('unread','read','acknowledged','resolved')),
+    status TEXT DEFAULT 'unread' CHECK(status IN ('unread','read','acknowledged','archived','resolved')),
     created_at TEXT NOT NULL,
     read_at TEXT,
     resolved_at TEXT,

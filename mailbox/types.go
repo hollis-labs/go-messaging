@@ -125,6 +125,7 @@ const (
 	StatusUnread       = "unread"
 	StatusRead         = "read"
 	StatusAcknowledged = "acknowledged"
+	StatusArchived     = "archived"
 	StatusResolved     = "resolved"
 )
 

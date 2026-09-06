@@ -130,7 +130,9 @@ audit table. The default policy holds ambiguous unread legacy rows as
 dead-lettered delivery obligations requiring authorized redrive, so migration
 does not blindly replay old mailbox rows. Historical read/resolved rows are
 preserved as completed history without fabricating `host_accepted`,
-`turn_submitted`, or `consumed` receipts.
+`turn_submitted`, or `consumed` receipts. See
+[`docs/messaging-vnext-compatibility.md`](./docs/messaging-vnext-compatibility.md)
+for the migration and rollback guide.
 
 ## Federation
 
