@@ -9,6 +9,28 @@ out explicitly below.
 
 ## Unreleased
 
+## v0.5.0 — 2026-09-06
+
+### Added
+
+- Reliable at-least-once delivery core with immutable message bodies,
+  per-recipient obligations, fenced leases, attempts, staged receipts,
+  retries, deadlines, dead letters and explicit redrive.
+- Memory and SQLite stores with shared conformance coverage, transactional
+  idempotency, restart recovery and legacy mailbox migration primitives.
+- Replayable delivery pump and durable host-handoff extension points with
+  bounded workers, coalesced hints and explicit offline-owner behavior.
+- Exact-session and durable-actor destinations, frozen fanout recipient sets,
+  and compatibility projections for root Store and tuple-addressed mailbox.
+- Migration/rollback guidance and examples for standalone and hosted use.
+
+### Compatibility
+
+- Existing root Inbox behavior and mailbox read/resolved semantics remain
+  available through named compatibility surfaces. Attention state is separate
+  from transport receipts; a handoff receipt does not claim model understanding
+  or successful task completion.
+
 ## v0.4.0 — 2026-09-05
 
 ### Added
