@@ -89,17 +89,24 @@ package never interprets it.
 
 ## Delivery semantics
 
-Exactly-once-per-recipient via `DeliveredAt` + `ConsumedAt` tracking:
+The root `Store` preserves the original delivered/consumed compatibility
+lifecycle:
 
-1. `Send` persists an envelope (CREATED).
-2. `Inbox(to)` returns undelivered envelopes AND atomically marks
-   them DELIVERED for that recipient.
-3. Consumer calls `Consume(id, recipient)` after processing
-   (CONSUMED).
+1. `Send` persists an envelope and assigns `ID` + `CreatedAt`.
+2. `Inbox(to)` returns undelivered envelopes and atomically marks them
+   `DeliveredAt` for that recipient.
+3. `Consume(id, recipient)` records the recipient's `ConsumedAt` marker.
 
-Crashing between Inbox and Consume means the envelope stays
-DELIVERED (does not re-appear in Inbox). Consumers that need
-at-least-once should wrap the Dispatcher in their own retry layer.
+That root `Inbox` behavior is intentionally destructive for future
+`Inbox` calls by the same recipient. It is useful for lightweight
+request/reply and simple local stores, but it is not a durable host-handoff
+receipt or proof that a model processed the message.
+
+The Messaging vNext reliability contract is specified in
+[`CONTRACTS.md`](./CONTRACTS.md). It separates immutable message content,
+per-recipient delivery obligations, host/runtime attempts, and independent
+reader attention state. The portable reliability target is at-least-once
+delivery with idempotent effects, not exactly-once model execution.
 
 ## Federation
 
