@@ -361,7 +361,10 @@ func (s *MemoryStore) Nack(_ context.Context, req NackRequest) (RecipientDeliver
 	if err != nil {
 		return RecipientDelivery{}, Attempt{}, err
 	}
-	if a.Stage == StageFailed || a.Stage == StageDeadLettered {
+	// See sqlite.go's Nack for why StageConsumed must be treated the same
+	// as the other terminal per-attempt stages here: a late Nack racing a
+	// concurrent successful Consume/Ack(consumed) must not reverse it.
+	if a.Stage == StageFailed || a.Stage == StageDeadLettered || a.Stage == StageConsumed {
 		return cloneDelivery(d), cloneAttempt(a), nil
 	}
 	at := req.At.UTC()

@@ -545,7 +545,18 @@ func (s *SQLiteStore) Nack(ctx context.Context, req NackRequest) (RecipientDeliv
 	if err != nil {
 		return RecipientDelivery{}, Attempt{}, err
 	}
-	if a.Stage == StageFailed || a.Stage == StageDeadLettered {
+	// A late Nack against an attempt that has already reached a terminal
+	// per-attempt stage (Failed/DeadLettered from an earlier Nack, or
+	// Consumed from a successful Ack) is a no-op that returns the current
+	// state, not a fresh outcome to record. Without the StageConsumed
+	// case, currentLease's own completed-idempotent allowance (needed so a
+	// legitimate duplicate Nack of the SAME failure is idempotent) let a
+	// Nack that raced a concurrent successful Consume/Ack(consumed)
+	// through anyway -- overwriting an already-Delivered delivery back to
+	// RetryScheduled/DeadLettered and causing a real re-delivery of
+	// already-consumed content. Successful consumption must be
+	// irreversible by a later Nack on the same (by-then-stale) lease.
+	if a.Stage == StageFailed || a.Stage == StageDeadLettered || a.Stage == StageConsumed {
 		if err := tx.Commit(); err != nil {
 			return RecipientDelivery{}, Attempt{}, err
 		}

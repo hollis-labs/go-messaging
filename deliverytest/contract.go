@@ -262,6 +262,40 @@ func RunStoreContract(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("a late nack cannot reverse an already-consumed delivery", func(t *testing.T) {
+		for _, retryable := range []bool{true, false} {
+			name := "retryable"
+			if !retryable {
+				name = "permanent"
+			}
+			t.Run(name, func(t *testing.T) {
+				h := factory(t)
+				res := mustEnqueue(t, h.Store, basicRequest("late-nack-"+name, agent("alice"), agent("bob")))
+				claim, err := h.Store.Claim(context.Background(), claimFor(res.Deliveries[0].ID, agent("bob"), "host", time.Minute, 7))
+				must(t, err)
+				ref := leaseRef(claim.Attempt)
+				// A concurrent consumer legitimately finishes this exact
+				// lease first -- e.g. Tether's own wake pump hands a lease
+				// to Consume, which completes it, while wake's own
+				// in-flight call is still mid-flight and about to observe
+				// a failure (busy/offline/send-error) against the SAME,
+				// by-then-stale lease reference it captured at claim time.
+				d, a, err := h.Store.Ack(context.Background(), delivery.AckRequest{Lease: ref, Stage: delivery.StageConsumed})
+				must(t, err)
+				if d.Status != delivery.DeliveryDelivered || a.Stage != delivery.StageConsumed {
+					t.Fatalf("setup: expected consumed delivery before the late nack, got delivery=%+v attempt=%+v", d, a)
+				}
+				after, _, nackErr := h.Store.Nack(context.Background(), delivery.NackRequest{Lease: ref, Retryable: retryable, Error: "late failure racing a completed consume"})
+				if after.Status != delivery.DeliveryDelivered {
+					t.Fatalf("late nack (retryable=%v) reversed a consumed delivery to %s (nack err: %v)", retryable, after.Status, nackErr)
+				}
+				if nackErr != nil {
+					t.Fatalf("late nack against an already-consumed delivery should be a harmless no-op, got err %v", nackErr)
+				}
+			})
+		}
+	})
+
 	t.Run("authorized redrive reopens dead letter", func(t *testing.T) {
 		h := factory(t)
 		res := mustEnqueue(t, h.Store, basicRequest("redrive", agent("alice"), agent("bob")))

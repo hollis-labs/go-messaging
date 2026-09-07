@@ -9,6 +9,27 @@ out explicitly below.
 
 ## Unreleased
 
+## v0.5.1 — 2026-09-07
+
+### Fixed
+
+- `Nack` (both `SQLiteStore` and `MemoryStore`) could reverse a delivery
+  that had already reached `Delivered` via `Ack(StageConsumed)`, if the
+  Nack raced in afterward against the same (by-then-stale) lease
+  reference — e.g. a claimant that observes a failure condition (busy,
+  offline, send error) after a concurrent consumer already finished
+  consuming the same lease. The completed-idempotent lease-fencing
+  allowance (needed so a legitimate duplicate `Nack` of the same failure
+  stays idempotent) let this through, since it did not distinguish "the
+  outcome I'm replaying is the same one already recorded" from "the
+  outcome I'm recording contradicts a different terminal outcome already
+  reached." `Nack` now treats an already-`StageConsumed` attempt the same
+  as an already-`Failed`/`DeadLettered` one: a harmless no-op that
+  returns the current (still `Delivered`) state, never overwriting it to
+  `RetryScheduled`/`DeadLettered`. Covered by a new shared contract test
+  (`deliverytest`) exercised against both backends, for both retryable
+  and non-retryable late Nacks.
+
 ## v0.5.0 — 2026-09-06
 
 ### Added
