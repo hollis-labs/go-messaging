@@ -9,6 +9,44 @@ out explicitly below.
 
 ## Unreleased
 
+## v0.5.2 — 2026-09-12
+
+### Fixed
+
+- **A zero `Address` now round-trips through JSON.** `MarshalJSON`
+  composed `URN()` from empty parts, producing the malformed
+  `"msg:////"`, which `UnmarshalJSON` then handed to `ParseURN` and
+  rejected. A zero Address now encodes as `""` and decodes back to the
+  zero value; populated addresses are unchanged.
+
+  This made any struct carrying an **optional** `Address` encodable but
+  not decodable. `json:"...,omitempty"` does not rescue such a field —
+  `omitempty` has no effect on a struct value, so the field is always
+  written.
+
+  Concretely, `delivery.RecipientDelivery` and `delivery.Attempt` both
+  embed `BindingTarget`, whose `Address` carries no `omitempty`. Neither
+  type could be decoded whenever no binding was set. That is every
+  response from Tether's `POST /messages/{id}/ack|nack`, since nothing
+  in Tether ever constructs a `BindingTarget` — so a Go client could not
+  consume the durable-delivery surface at all. It went unnoticed because
+  the producer only ever serializes these types; the first consumer to
+  decode them found it.
+
+  `""` is the only newly accepted form. `"msg:////"`, `"msg://"`, a
+  bare `agent/x/y` and whitespace all still fail, so this widens the
+  zero case without loosening URN validation.
+
+### Changed
+
+- **Minimum Go raised from `1.22` to `1.26.2`**, with `toolchain
+  go1.26.6`. At the old floor and `GOTOOLCHAIN=auto` this module
+  resolved to a standard library carrying known vulnerabilities;
+  `govulncheck` is clean at the new floor. Every consumer in the
+  portfolio already requires more than this — Tether 1.26.2,
+  go-tether-client 1.26.2, Torque 1.26.6, Nanite 1.26.7 — so nothing is
+  constrained by the change. Closes CW-20260912-0016.
+
 ## v0.5.1 — 2026-09-07
 
 ### Fixed

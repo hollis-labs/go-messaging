@@ -32,16 +32,37 @@ func (a Address) IsZero() bool {
 	return a.Kind == "" && a.Authority == "" && a.ID == "" && a.SubID == ""
 }
 
-// MarshalJSON encodes Address as its canonical URN string.
+// MarshalJSON encodes Address as its canonical URN string. A zero
+// Address encodes as "" rather than as the malformed "msg:////" that
+// URN() composes from empty parts -- see UnmarshalJSON for why the
+// asymmetry mattered.
 func (a Address) MarshalJSON() ([]byte, error) {
+	if a.IsZero() {
+		return json.Marshal("")
+	}
 	return json.Marshal(a.URN())
 }
 
-// UnmarshalJSON decodes a canonical URN string into an Address.
+// UnmarshalJSON decodes a canonical URN string into an Address. The
+// empty string decodes to the zero Address.
+//
+// Accepting "" is what makes a zero Address round-trip. Before this,
+// MarshalJSON emitted "msg:////" for a zero value and ParseURN then
+// rejected it, so any struct with an optional Address field could be
+// encoded and never decoded again. `json:"...,omitempty"` does not save
+// such a field either -- omitempty has no effect on a struct, so the
+// field is always written. delivery.RecipientDelivery and
+// delivery.Attempt both hit this through BindingTarget and were
+// undecodable whenever no binding was set, which is every response
+// Tether's POST /messages/{id}/ack|nack returns.
 func (a *Address) UnmarshalJSON(data []byte) error {
 	var s string
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
+	}
+	if s == "" {
+		*a = Address{}
+		return nil
 	}
 	parsed, err := ParseURN(s)
 	if err != nil {
