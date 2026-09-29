@@ -29,7 +29,7 @@ breaking changes may still occur in minor versions; see
 go get github.com/hollis-labs/go-messaging
 ```
 
-Requires Go 1.22 or newer.
+Requires Go 1.26.6 or newer.
 
 ## Quick start
 
