@@ -137,7 +137,7 @@ func (s *Store) send(ctx context.Context, client *http.Client, c call) (*http.Re
 			return nil, fmt.Errorf("httpstore: request hook (%s): %w", c.op, err)
 		}
 	}
-	resp, err := client.Do(req) //nolint:gosec // G704: the URL is built from the operator-supplied base URL, validated in New
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", messaging.ErrStoreUnavailable, err)
 	}
@@ -398,7 +398,9 @@ func (s *Store) pump(ctx context.Context, body io.ReadCloser, ch chan<- messagin
 			return false
 		}
 	}, report)
-	if err != nil && ctx.Err() == nil {
+	// A clean end of stream, a consumer that stopped, and a canceled context
+	// are normal ends; anything else is worth reporting.
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, errStopped) && ctx.Err() == nil {
 		report(fmt.Errorf("httpstore: stream ended: %w", err))
 	}
 }
