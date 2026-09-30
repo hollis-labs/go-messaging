@@ -18,6 +18,8 @@ store and contract suites; durable and networked stores belong to consumers.
 - `mailbox/` is the optional non-destructive inbox, deliberately separate from
   the root store's delivered/consumed contract.
 - `memstore/` is the in-memory reference implementation.
+- `sqlstore/` is the reference SQLite implementation of the root `Store`;
+  `Consume` there is deliberately one upsert statement (see its doc.go).
 - `messagingtest/` and `deliverytest/` are the conformance suites third-party
   stores run.
 

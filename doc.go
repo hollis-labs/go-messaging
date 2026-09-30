@@ -5,8 +5,8 @@
 // Filter), interfaces (Store, Dispatcher), error sentinels, and an
 // in-memory reference Store implementation under memstore/. It is not
 // itself a running service — concrete Store implementations are
-// supplied by consumer applications (a SQL-backed Store for app-local
-// messaging, say); the httpstore subpackage is an HTTP client Store for
+// supplied by consumer applications or by the optional subpackages: sqlstore
+// is a reference SQLite Store, and httpstore is an HTTP client Store for
 // reaching a remote daemon.
 //
 // Addresses are typed structs serialized as URNs on the wire:
