@@ -128,3 +128,23 @@ func ExampleRouter() {
 	// branch is local: false
 	// routes: [branch]
 }
+
+// TestRouter_LocalAuthority checks the accessor reports the construction-time
+// authority, is unaffected by Register/Unregister, and is empty when the
+// Router was built without one.
+func TestRouter_LocalAuthority(t *testing.T) {
+	r := messaging.NewRouter(memstore.New(), "hq")
+	if got := r.LocalAuthority(); got != "hq" {
+		t.Errorf("LocalAuthority() = %q, want %q", got, "hq")
+	}
+	if err := r.Register("branch", memstore.New()); err != nil {
+		t.Fatal(err)
+	}
+	r.Unregister("branch")
+	if got := r.LocalAuthority(); got != "hq" {
+		t.Errorf("LocalAuthority() after Register/Unregister = %q, want %q", got, "hq")
+	}
+	if got := messaging.NewRouter(memstore.New(), "").LocalAuthority(); got != "" {
+		t.Errorf("LocalAuthority() with no local authority = %q, want empty", got)
+	}
+}
