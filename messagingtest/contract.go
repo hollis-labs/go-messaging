@@ -13,6 +13,37 @@ import (
 	"github.com/hollis-labs/go-messaging"
 )
 
+// ContractOption adjusts RunContract. The zero set of options runs the whole
+// contract.
+type ContractOption func(*contractConfig)
+
+type contractConfig struct{ without []string }
+
+func (c *contractConfig) skips(op string) bool {
+	for _, w := range c.without {
+		if w == op {
+			return true
+		}
+	}
+	return false
+}
+
+// Without tells RunContract that the Store under test does not provide the
+// named operations, so the sub-tests that depend on them are skipped (and
+// reported as skipped, not silently absent). Supported names:
+//
+//   - "Inbox" skips "Inbox atomic delivery", "Inbox chronological +
+//     tie-break" and "Thread chronological, no side effects" (the last one
+//     verifies "no side effects" by reading the recipient's Inbox).
+//   - "Subscribe" skips the three Subscribe sub-tests and both
+//     Dispatcher.Request sub-tests (Request subscribes for the response).
+//
+// An unknown name fails the test. "Consume sets ConsumedAt, idempotent" is
+// never skipped: it ignores Inbox's result and so still runs.
+func Without(ops ...string) ContractOption {
+	return func(c *contractConfig) { c.without = append(c.without, ops...) }
+}
+
 // Factory constructs a fresh Store for one sub-test. Impls that require
 // teardown should return a Store whose close is tied to t.Cleanup.
 type Factory func(t *testing.T) messaging.Store
@@ -25,8 +56,33 @@ type Factory func(t *testing.T) messaging.Store
 //	        return memstore.New()
 //	    })
 //	}
-func RunContract(t *testing.T, factory Factory) {
+//
+// A Store that legitimately lacks an operation (for example a federation
+// hop that never exposes Inbox or Subscribe) passes Without to skip the
+// sub-tests that depend on it; see Without for the exact mapping. With no
+// options every sub-test runs, exactly as before.
+func RunContract(t *testing.T, factory Factory, opts ...ContractOption) {
 	t.Helper()
+	var cfg contractConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	for _, op := range cfg.without {
+		if op != "Inbox" && op != "Subscribe" {
+			t.Fatalf("messagingtest: Without(%q): unknown operation (want \"Inbox\" or \"Subscribe\")", op)
+		}
+	}
+	// run is t.Run for a sub-test that exercises the operation named by
+	// needs; when the caller opted out of that operation with Without the
+	// sub-test is reported as skipped instead of run.
+	run := func(name, needs string, fn func(t *testing.T)) {
+		t.Run(name, func(t *testing.T) {
+			if cfg.skips(needs) {
+				t.Skipf("Store opted out of %s via Without", needs)
+			}
+			fn(t)
+		})
+	}
 	t.Run("Send assigns ID + CreatedAt", func(t *testing.T) {
 		s := factory(t)
 		out, err := s.Send(context.Background(), basicEnv())
@@ -55,7 +111,7 @@ func RunContract(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("Inbox atomic delivery", func(t *testing.T) {
+	run("Inbox atomic delivery", "Inbox", func(t *testing.T) {
 		s := factory(t)
 		ctx := context.Background()
 		to := recipient("r1")
@@ -71,7 +127,7 @@ func RunContract(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("Inbox chronological + tie-break", func(t *testing.T) {
+	run("Inbox chronological + tie-break", "Inbox", func(t *testing.T) {
 		s := factory(t)
 		ctx := context.Background()
 		to := recipient("r2")
@@ -119,7 +175,7 @@ func RunContract(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("Thread chronological, no side effects", func(t *testing.T) {
+	run("Thread chronological, no side effects", "Inbox", func(t *testing.T) {
 		s := factory(t)
 		ctx := context.Background()
 		to := recipient("r4")
@@ -139,7 +195,7 @@ func RunContract(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("Subscribe live-only", func(t *testing.T) {
+	run("Subscribe live-only", "Subscribe", func(t *testing.T) {
 		s := factory(t)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -166,7 +222,7 @@ func RunContract(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("Subscribe filters to recipient only", func(t *testing.T) {
+	run("Subscribe filters to recipient only", "Subscribe", func(t *testing.T) {
 		s := factory(t)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -197,7 +253,7 @@ func RunContract(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("Subscribe ctx cancel closes channel", func(t *testing.T) {
+	run("Subscribe ctx cancel closes channel", "Subscribe", func(t *testing.T) {
 		s := factory(t)
 		ctx, cancel := context.WithCancel(context.Background())
 		ch, _ := s.Subscribe(ctx, recipient("subCtx"), messaging.Filter{})
@@ -212,7 +268,7 @@ func RunContract(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("Dispatcher.Request round-trip", func(t *testing.T) {
+	run("Dispatcher.Request round-trip", "Subscribe", func(t *testing.T) {
 		s := factory(t)
 		d := messaging.NewDispatcher(s)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -245,7 +301,7 @@ func RunContract(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("Dispatcher.Request times out", func(t *testing.T) {
+	run("Dispatcher.Request times out", "Subscribe", func(t *testing.T) {
 		s := factory(t)
 		d := messaging.NewDispatcher(s)
 		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
