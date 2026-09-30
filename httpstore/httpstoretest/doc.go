@@ -18,8 +18,11 @@
 //     answers 403 unless as is the sender or recipient; Thread returns only
 //     the turns involving as; Consume answers 409 when the recipient is not
 //     the envelope's addressee). Under a profile that does not assert
-//     identity (Torque's) the only strict rule is that Consume needs its
-//     recipient in the body.
+//     identity (Torque's) strictness adds nothing: that peer is identified
+//     by its client certificate, which is the transport's business.
+//
+// A Consume must always state its recipient, strict or not: as ?as= (400
+// without) or, under ConsumeBody, in the JSON body (422 without).
 //
 // Independently of strictness the server copies two Tether behaviours that a
 // client must not depend on: under an identity-asserting profile Inbox
