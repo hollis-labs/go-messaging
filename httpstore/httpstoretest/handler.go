@@ -359,24 +359,25 @@ func (s *server) subscribe(w http.ResponseWriter, r *http.Request) {
 func (s *server) request(w http.ResponseWriter, r *http.Request) {
 	timeout := 30 * time.Second
 	if v := r.URL.Query().Get("timeout"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			timeout = d
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			s.fail(w, http.StatusBadRequest, "invalid_request", "invalid timeout: "+err.Error())
+			return
 		}
+		timeout = d
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
 	var env messaging.Envelope
 	if err := json.NewDecoder(r.Body).Decode(&env); err != nil {
 		s.fail(w, http.StatusBadRequest, "invalid_request", "invalid body: "+err.Error())
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	// Like Tether, any failure to obtain a response is a 504 with code
+	// "timeout".
 	out, err := s.disp.Request(ctx, env)
 	if err != nil {
-		if errors.Is(err, messaging.ErrRequestTimeout) || errors.Is(err, context.DeadlineExceeded) {
-			s.fail(w, http.StatusGatewayTimeout, "request_timeout", "request timed out")
-			return
-		}
-		s.storeErr(w, err)
+		s.fail(w, http.StatusGatewayTimeout, "timeout", "no response within "+timeout.String())
 		return
 	}
 	s.writeJSON(w, http.StatusOK, out)

@@ -114,7 +114,7 @@ func TestDispatcher_RequestTimeout(t *testing.T) {
 		}
 	})
 	t.Run("server 504 without a client deadline", func(t *testing.T) {
-		srv, _ := stub(t, http.StatusGatewayTimeout, "application/json", `{"error":{"code":"request_timeout","message":"request timed out"}}`)
+		srv, _ := stub(t, http.StatusGatewayTimeout, "application/json", `{"error":{"code":"timeout","message":"no response within 1s"}}`)
 		d, _ := httpstore.NewDispatcher(srv.URL, httpstore.WithIdentity(alice))
 		_, err := d.Request(context.Background(), notice(alice, bob))
 		var se *httpstore.StatusError

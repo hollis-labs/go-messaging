@@ -258,14 +258,17 @@ func TestBlockingRequestRoute(t *testing.T) {
 	start := time.Now()
 	got, body := do(t, "POST", srv.URL+"/messages/request?timeout=100ms",
 		`{"from":"`+alice.URN()+`","to":"`+bob.URN()+`"}`)
-	if got != 504 || !strings.Contains(body, "request_timeout") {
-		t.Errorf("no responder = %d %s, want 504 request_timeout", got, body)
+	if got != 504 || !strings.Contains(body, `"code":"timeout"`) {
+		t.Errorf("no responder = %d %s, want 504 timeout", got, body)
 	}
 	if time.Since(start) > 5*time.Second {
 		t.Error("the timeout parameter was not honoured")
 	}
 	if got, _ := do(t, "POST", srv.URL+"/messages/request", "nope"); got != 400 {
 		t.Errorf("bad body = %d, want 400", got)
+	}
+	if got, _ := do(t, "POST", srv.URL+"/messages/request?timeout=soon", "{}"); got != 400 {
+		t.Errorf("bad timeout = %d, want 400", got)
 	}
 }
 
