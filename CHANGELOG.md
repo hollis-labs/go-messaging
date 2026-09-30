@@ -7,7 +7,7 @@ While the major version is `0.x`, the API is considered pre-1.0 and
 breaking changes may occur in minor (`0.y`) versions; they are called
 out explicitly below.
 
-## Unreleased
+## v0.7.0 — 2026-09-30
 
 ### Added
 
