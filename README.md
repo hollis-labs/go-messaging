@@ -10,10 +10,10 @@ agent-to-user messaging.
 semantics so multiple applications can speak the same wire protocol.
 It ships an in-memory reference `Store`, a request/reply `Dispatcher`,
 a Messaging vNext reliable-delivery reference in `delivery`, and shared
-contract test suites that third-party stores can run. Concrete persistent
-`Store` implementations are provided by consumer applications; an HTTP-backed
-client for a remote daemon ships here as the optional
-[`httpstore`](./httpstore/) subpackage.
+contract test suites that third-party stores can run. A reference SQLite
+`Store` ships as the optional [`sqlstore`](./sqlstore/) subpackage, and an
+HTTP-backed client for a remote daemon as [`httpstore`](./httpstore/);
+applications may keep persistent `Store` implementations of their own.
 
 Applications that need a durable, tuple-addressed inbox with
 unread/read/resolved state can use the optional
@@ -235,6 +235,62 @@ context cancel or stream end, with no reconnect.
 options; `messagingtest.Without("Inbox", "Subscribe")` skips the sub-tests for
 operations a Store legitimately lacks, such as Torque's federation hop.
 
+## sqlstore
+
+The optional `sqlstore` subpackage is a reference, standalone SQLite
+implementation of the root `Store` over a schema it owns. It is for new
+adopters, such as the durable `Store` behind an `httpstore` daemon. An
+application that already carries its own schema does not have to migrate.
+
+```go
+import (
+    "context"
+    "database/sql"
+    "fmt"
+
+    _ "modernc.org/sqlite" // the caller picks the driver
+
+    messaging "github.com/hollis-labs/go-messaging"
+    "github.com/hollis-labs/go-messaging/sqlstore"
+)
+
+func main() {
+    ctx := context.Background()
+    db, err := sql.Open("sqlite", "file:messages.db?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+    if err != nil {
+        panic(err)
+    }
+    defer db.Close()
+    if err := sqlstore.Migrate(ctx, db); err != nil { // idempotent
+        panic(err)
+    }
+    store := sqlstore.New(db)
+
+    alice := messaging.Address{Kind: messaging.KindAgent, Authority: "app", ID: "alice"}
+    bob := messaging.Address{Kind: messaging.KindAgent, Authority: "app", ID: "bob"}
+    sent, _ := store.Send(ctx, messaging.Envelope{Kind: messaging.MsgKindNotice, From: alice, To: bob})
+    inbox, _ := store.Inbox(ctx, bob, messaging.Filter{})
+    fmt.Println(len(inbox), store.Consume(ctx, sent.ID, bob)) // 1 <nil>
+}
+```
+
+`Migrate` applies the embedded DDL and `Schema()` returns it as an `fs.FS` for
+hosts that run their own migrations. The package imports no SQL driver: open
+the `*sql.DB` yourself and set a busy timeout (and WAL) so concurrent writers
+wait instead of failing. `INSERT ... RETURNING` needs SQLite 3.35 or newer.
+`Subscribe` is an in-process fan-out for envelopes sent through the same
+`*Store`; use `Inbox` or `Thread` for durable reads.
+
+It implements only the root contract (a destructive `Inbox` and per-recipient
+delivered/consumed markers). Crash-safe delivery obligations, leases and
+receipts stay in [`delivery`](./delivery/); compose the two rather than
+expecting `sqlstore` to grow them. It passes `messagingtest.RunContract` and
+`RunRouterContract`.
+
+`Consume` is a single upsert, so it is idempotent under concurrency, including
+when it runs before or alongside `Inbox` for the same envelope. See the
+CHANGELOG for the race this avoids.
+
 ## Writing a new Store implementation
 
 Any `Store` implementation must pass the shared contract test suite:
@@ -268,7 +324,8 @@ guarantees on top of the base contract.
 addressing, in-memory reference Store, reliable `delivery` state machine,
 contract test suites, Dispatcher request/reply helper, the authority-routing
 `Router` decorator, and an HTTP client `Store`/`Dispatcher` (`httpstore`) with
-a reference server for conformance testing (`httpstore/httpstoretest`).
+a reference server for conformance testing (`httpstore/httpstoretest`), and a
+reference SQLite `Store` (`sqlstore`).
 
 ## Out of scope
 

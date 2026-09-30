@@ -7,6 +7,37 @@ While the major version is `0.x`, the API is considered pre-1.0 and
 breaking changes may occur in minor (`0.y`) versions; they are called
 out explicitly below.
 
+## v0.7.0 — 2026-09-30
+
+### Added
+
+- **`sqlstore`: a reference SQLite `messaging.Store`.** A standalone
+  implementation of the root `Store` over a schema the package owns
+  (`messages` plus a per-recipient `message_deliveries` table), with
+  `New`, `Migrate`, `Schema() fs.FS` and `DB()`. It is for new adopters, such
+  as the durable `Store` behind an `httpstore` daemon; applications that keep
+  their own schema do not have to migrate. SQLite-specific, imports no SQL
+  driver, and needs no external transaction helper or `MaxOpenConns=1`: `Inbox`
+  claims envelopes with one `INSERT ... SELECT ... ON CONFLICT DO NOTHING
+  RETURNING` statement. It passes `messagingtest.RunContract` and
+  `RunRouterContract`. Delivery obligations, leases and receipts remain the
+  job of `delivery`.
+
+### Fixed (in the new `sqlstore` only)
+
+- **`Consume` is idempotent under concurrency.** The hand-written SQLite store
+  this package was derived from (Torque's private `internal/messaging`
+  `sqlstore.go`) implements `Consume` as an `UPDATE` followed, when it finds no
+  row, by a separate `INSERT`. Calling `Consume` before `Inbox` for the same
+  message, which the `Store` documentation allows, can therefore lose a race
+  with `Inbox`'s own insert and fail with a raw primary-key violation instead
+  of the idempotent success the contract promises. `sqlstore.Consume` is a
+  single `INSERT ... ON CONFLICT DO UPDATE` upsert. Nothing in this module's
+  existing packages changes; the private copy in Torque is tracked separately
+  (CW-20260930-0067). Covered by `TestConsumeInboxRaceDeterministic` and
+  `TestConsumeInboxRace`, with the failing shape reproduced in
+  `TestConsumeInboxRaceReproducedOnTorqueShape`.
+
 ## v0.6.0 — 2026-09-29
 
 ### Added
