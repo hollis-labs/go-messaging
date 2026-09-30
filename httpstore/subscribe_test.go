@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -58,52 +57,48 @@ func recv(t *testing.T, ch <-chan messaging.Envelope) (messaging.Envelope, bool)
 // Cancelling the context closes the channel, and repeated subscribe/cancel
 // cycles leave no goroutines behind (the stream reader, the body, the
 // transport's connection goroutines).
+//
+// Each cycle gets its own store and server, and the server is closed before
+// the next: memstore's fan-out can race a Send against the cleanup of a
+// just-cancelled subscription on the same store (see the report on this
+// change), and this test is about the client's goroutines, not that.
 func TestSubscribe_CancelClosesChannelAndLeaksNothing(t *testing.T) {
-	ms := memstore.New()
-	srv := httpstoretest.NewServer(t, ms, nil, httpstore.TetherProfile())
-	client := noKeepAlive()
-	s, err := httpstore.New(srv.URL, httpstore.WithHTTPClient(client))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Warm up once so lazily started runtime goroutines are in the baseline.
-	{
+	cycle := func() {
+		ms := memstore.New()
+		srv := httptest.NewServer(httpstoretest.Handler(ms, nil, httpstore.TetherProfile()))
+		defer srv.Close()
+		s, err := httpstore.New(srv.URL, httpstore.WithHTTPClient(noKeepAlive()))
+		if err != nil {
+			t.Fatal(err)
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		ch, err := s.Subscribe(ctx, bob, messaging.Filter{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		cancel()
-		for range ch {
-		}
-	}
-	waitFor(t, "warm-up goroutines to exit", func() bool { return goroutines() < 1000 })
-	time.Sleep(50 * time.Millisecond)
-	before := goroutines()
-
-	for i := 0; i < 25; i++ {
-		ctx, cancel := context.WithCancel(context.Background())
-		ch, err := s.Subscribe(ctx, bob, messaging.Filter{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := ms.Send(ctx, notice(alice, bob)); err != nil {
+		if _, err := s.Send(ctx, notice(alice, bob)); err != nil {
 			t.Fatal(err)
 		}
 		if _, ok := recv(t, ch); !ok {
 			t.Fatal("channel closed early")
 		}
 		cancel()
-		select {
-		case _, ok := <-ch:
-			for ok { // drain anything buffered, then it must close
-				_, ok = <-ch
+		deadline := time.After(3 * time.Second)
+		for open := true; open; {
+			select {
+			case _, open = <-ch: // drain anything buffered; it must then close
+			case <-deadline:
+				t.Fatal("channel did not close after cancel")
 			}
-		case <-time.After(3 * time.Second):
-			t.Fatal("channel did not close after cancel")
 		}
 	}
-	waitFor(t, fmt.Sprintf("goroutines to return to %d (now %d)", before, goroutines()), func() bool { return goroutines() <= before })
+	cycle() // warm-up, so lazily started runtime goroutines are in the baseline
+	time.Sleep(100 * time.Millisecond)
+	before := goroutines()
+	for i := 0; i < 25; i++ {
+		cycle()
+	}
+	waitFor(t, "goroutines to return to the baseline", func() bool { return goroutines() <= before })
 }
 
 // A consumer that stops reading and then cancels must not strand the reader
