@@ -142,6 +142,13 @@ func (r *Router) Authorities() []string {
 	return out
 }
 
+// LocalAuthority returns the local authority passed to NewRouter, or ""
+// if the Router was built without one. It is fixed at construction and
+// never appears in Authorities.
+func (r *Router) LocalAuthority() string {
+	return r.localAuthority
+}
+
 // IsLocal reports whether authority is served by the local Store — that is,
 // it has no registered foreign route. This is the one "internal vs
 // external" question the federation model asks: internal and external

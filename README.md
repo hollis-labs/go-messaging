@@ -10,8 +10,10 @@ agent-to-user messaging.
 semantics so multiple applications can speak the same wire protocol.
 It ships an in-memory reference `Store`, a request/reply `Dispatcher`,
 a Messaging vNext reliable-delivery reference in `delivery`, and shared
-contract test suites that third-party stores can run. Concrete persistent /
-networked `Store` implementations are provided by consumer applications.
+contract test suites that third-party stores can run. Concrete persistent
+`Store` implementations are provided by consumer applications; an HTTP-backed
+client for a remote daemon ships here as the optional
+[`httpstore`](./httpstore/) subpackage.
 
 Applications that need a durable, tuple-addressed inbox with
 unread/read/resolved state can use the optional
@@ -164,8 +166,74 @@ authority — and are served from the local `Store`.
 
 `WithStrictRouting()` makes the `Router` return `ErrNoRoute` for an authority
 that is neither local nor registered, instead of falling through. The
-network transport for a foreign hop, and any cross-host authentication, are
-supplied by the foreign `Store` itself — `Router` only decides the route.
+`Router` only decides the route: the transport for a foreign hop is the foreign
+`Store` itself, for example an [`httpstore`](#http-backed-store) client, and any
+cross-host authentication is supplied by that `Store`'s HTTP client. A `Router`
+reports the authority it serves with `LocalAuthority()`.
+
+## HTTP-backed Store
+
+The optional `httpstore` subpackage is one `Store` and `Dispatcher` client for
+a remote HTTP daemon, in place of a private copy per application:
+
+```bash
+go get github.com/hollis-labs/go-messaging/httpstore
+```
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "net/http/httptest"
+
+    "github.com/hollis-labs/go-messaging"
+    "github.com/hollis-labs/go-messaging/httpstore"
+    "github.com/hollis-labs/go-messaging/httpstore/httpstoretest"
+    "github.com/hollis-labs/go-messaging/memstore"
+)
+
+func main() {
+    // A stand-in daemon; in an application this is the real server's URL.
+    srv := httptest.NewServer(httpstoretest.Handler(memstore.New(), nil, httpstore.TetherProfile()))
+    defer srv.Close()
+
+    me := messaging.Address{Kind: messaging.KindAgent, Authority: "app", ID: "alice"}
+    peer := messaging.Address{Kind: messaging.KindAgent, Authority: "app", ID: "bob"}
+
+    store, err := httpstore.New(srv.URL, httpstore.WithIdentity(me))
+    if err != nil {
+        panic(err)
+    }
+    ctx := context.Background()
+    if _, err := store.Send(ctx, messaging.Envelope{Kind: messaging.MsgKindNotice, From: me, To: peer}); err != nil {
+        panic(err)
+    }
+    inbox, err := store.Inbox(ctx, peer, messaging.Filter{})
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(len(inbox), "message for", peer.ID)
+}
+```
+
+The wire is not part of the go-messaging contract. Two dialects that exist
+today are selectable as a `Profile` (`TetherProfile`,
+`TorqueFederationProfile`); [`docs/http-wire.md`](./docs/http-wire.md)
+describes them as they behave, with the Tether and Torque revisions it was
+read from. `WithHTTPClient` is the transport seam (a mutual-TLS, pinned
+certificate or unix-socket client plugs in there) and `WithRequestHook` the
+place for auth headers or trace propagation, so neither dependency enters this
+module. `Subscribe` connects before it returns and closes its channel on
+context cancel or stream end, with no reconnect.
+
+`httpstore/httpstoretest` holds a reference server (a `Store` behind a
+`Profile`'s routes, optionally enforcing Tether's `?as=` rules with
+`WithStrictIdentity`) and `RunConformance`, which runs `RunContract` and
+`RunRouterContract` against a client of it. `messagingtest.RunContract` takes
+options; `messagingtest.Without("Inbox", "Subscribe")` skips the sub-tests for
+operations a Store legitimately lacks, such as Torque's federation hop.
 
 ## Writing a new Store implementation
 
@@ -198,19 +266,36 @@ guarantees on top of the base contract.
 
 **In scope:** contract types, interfaces, delivery lifecycle, URN
 addressing, in-memory reference Store, reliable `delivery` state machine,
-contract test suites, Dispatcher request/reply helper, and the
-authority-routing `Router` decorator.
+contract test suites, Dispatcher request/reply helper, the authority-routing
+`Router` decorator, and an HTTP client `Store`/`Dispatcher` (`httpstore`) with
+a reference server for conformance testing (`httpstore/httpstoretest`).
 
-**Out of scope for the legacy root `Store` (explicitly):** authentication/
-authorization, escalation routing, cross-host transport (the foreign `Store`
-behind a `Router` route is app-supplied — e.g. an HTTP client), federation
-authentication, tracing hooks, and large-binary payloads. Retry scheduling,
+## Out of scope
+
+For the legacy root `Store` (explicitly): authentication/authorization,
+escalation routing, cross-host authentication and trust (mutual TLS,
+certificate pinning, peer authorization: `httpstore` only offers the
+`WithHTTPClient` and `WithRequestHook` seams), tracing (a hook, not a
+dependency), a production HTTP server (`httpstoretest` is a test double),
+reconnecting subscriptions, and large-binary payloads. Retry scheduling,
 lease fencing, deadline/dead-letter handling, and authorized redrive live in
 the `delivery` package instead of silently changing root `Inbox`/`Consume`.
 
 The optional `mailbox` subpackage is such a higher layer. It supplies
 service orchestration and a SQLite adapter for its distinct durable-inbox
 contract without changing this root interface.
+
+## Compatibility
+
+`RunContract` gained a trailing variadic `ContractOption` parameter; every
+existing call compiles unchanged (only a program that stores `RunContract`
+in a variable of the old function type needs an adapter). `Router` gained a
+`LocalAuthority` method. Both are additive. `httpstore` is part of this
+module, so it needs the same Go version as the rest of it (see Install) and
+adds no dependency. Its wire profiles describe servers as read at the
+revisions named in `docs/http-wire.md`; while the major version is `0.x`,
+minor versions may change them. Adopters that pin an older `go-messaging`
+must bump it to use `httpstore`.
 
 ## Documentation
 
