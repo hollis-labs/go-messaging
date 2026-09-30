@@ -9,6 +9,33 @@ out explicitly below.
 
 ## Unreleased
 
+Shaped as v0.6.0 (a new minor with additive API); not yet tagged.
+
+### Added
+
+- **`httpstore`: an HTTP-backed `messaging.Store` and `Dispatcher`.**
+  One client in place of the private copies that Tether, Torque, Hadron and
+  the Tether and agentmux client libraries each carry, and that had drifted
+  apart (a Subscribe that sent no `?as=`, a Get with no identity, a client that
+  could truncate an Inbox the server had already marked delivered). Wire
+  dialects are options, not a blessed protocol: `TetherProfile()` and
+  `TorqueFederationProfile()`. `WithHTTPClient` is the transport seam for
+  mutual-TLS, pinned-certificate or unix-socket clients and
+  `WithRequestHook` the place for auth headers and trace propagation. It
+  depends on the standard library and this module only. Subscribe connects
+  before it returns, reads the stream with a spec-correct SSE parser, and
+  reports undecodable frames through `WithOnFrameError`. Descriptive wire
+  notes are in `docs/http-wire.md`.
+- **`httpstore/httpstoretest`: a reference HTTP server and conformance
+  wiring.** `Handler` puts any `Store` behind a profile's routes;
+  `WithStrictIdentity` enforces Tether's `?as=` rules; `RunConformance` runs
+  `RunContract` and `RunRouterContract` against a client of it.
+- **`Router.LocalAuthority()`** returns the authority a Router was built with.
+- **`messagingtest.RunContract` takes options, and `messagingtest.Without`**
+  skips the sub-tests that need `Inbox` or `Subscribe`, for a Store that
+  legitimately lacks them (a federation hop). Skipped sub-tests are reported
+  as skipped. The new parameter is variadic, so existing callers are unchanged.
+
 ### Changed
 
 - Raised the module's `go` directive to `1.26.6` (Go floor across the portfolio); CI now uses `go-version-file: go.mod`.
